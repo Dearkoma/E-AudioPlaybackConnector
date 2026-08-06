@@ -570,7 +570,8 @@ void RestoreAudioService()
 		nullptr,
 		_(L"This will restart Windows Audio and Bluetooth audio services to recover from stuck or silent connections.\n\n"
 		  L"Administrator permission is required.\n\n"
-		  L"All current audio connections will be lost. You will need to reconnect your Bluetooth device after the restart.\n\n"
+		  L"Only audio services are restarted — other Bluetooth devices (mouse, keyboard, etc.) will NOT be affected.\n\n"
+		  L"Current audio connections will be closed. You will need to reconnect your Bluetooth audio device after the restart.\n\n"
 		  L"Do you want to continue?"),
 		TDCBF_YES_BUTTON | TDCBF_CANCEL_BUTTON, TD_WARNING_ICON, nullptr);
 
@@ -609,8 +610,6 @@ void RestoreAudioService()
 				L"net stop AudioEndpointBuilder /y 2>nul & "
 				L"net stop BTAGService /y 2>nul & "
 				L"net stop BthAvctpSvc /y 2>nul & "
-				L"net stop bthserv /y 2>nul & "
-				L"net start bthserv 2>nul & "
 				L"net start BthAvctpSvc 2>nul & "
 				L"net start BTAGService 2>nul & "
 				L"net start AudioEndpointBuilder 2>nul & "
