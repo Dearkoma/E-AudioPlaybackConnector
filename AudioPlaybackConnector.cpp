@@ -201,6 +201,36 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			g_lastDevices.clear();
 		}
 		break;
+	case WM_RESTORESERVICE_RESULT:
+	{
+		if (wParam == 0)
+		{
+			TaskDialog(nullptr, nullptr,
+				_(L"Bluetooth Audio Restarted"),
+				nullptr,
+				_(L"Windows Audio and Bluetooth services have been restarted successfully.\n\nPlease reconnect your Bluetooth device now."),
+				TDCBF_OK_BUTTON, TD_INFORMATION_ICON, nullptr);
+		}
+		else if (wParam == 2)
+		{
+			TaskDialog(nullptr, nullptr,
+				_(L"Service Restart Failed"),
+				nullptr,
+				_(L"Could not restart the audio services.\n\n"
+				  L"This may happen if the elevation prompt was denied.\n\n"
+				  L"If audio is still not working, please reboot your computer."),
+				TDCBF_OK_BUTTON, TD_ERROR_ICON, nullptr);
+		}
+		else
+		{
+			TaskDialog(nullptr, nullptr,
+				_(L"Service Restart Failed"),
+				nullptr,
+				_(L"The restart did not complete successfully (the operation may have been cancelled or some services are not available).\n\nIf audio is still not working, please reboot your computer."),
+				TDCBF_OK_BUTTON, TD_ERROR_ICON, nullptr);
+		}
+		break;
+	}
 	default:
 		if (WM_TASKBAR_CREATED && message == WM_TASKBAR_CREATED)
 		{
@@ -549,67 +579,67 @@ void RestoreAudioService()
 		return;
 	}
 
-	// Close all connections first so the audio endpoints are released
-	DisconnectAllDevices();
-
-	// Restart audio and Bluetooth services together.
-	// Stop order: audio services first, then Bluetooth.
-	// Start order: Bluetooth first, then audio.
-	SHELLEXECUTEINFOW sei = {
-		.cbSize = sizeof(sei),
-		.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC,
-		.hwnd = g_hWnd,
-		.lpVerb = L"runas",
-		.lpFile = L"cmd",
-		.lpParameters = L"/c "
-			L"net stop audiosrv /y 2>nul & "
-			L"net stop AudioEndpointBuilder /y 2>nul & "
-			L"net stop BTAGService /y 2>nul & "
-			L"net stop BthAvctpSvc /y 2>nul & "
-			L"net stop bthserv /y 2>nul & "
-			L"net start bthserv 2>nul & "
-			L"net start BthAvctpSvc 2>nul & "
-			L"net start BTAGService 2>nul & "
-			L"net start AudioEndpointBuilder 2>nul & "
-			L"net start audiosrv 2>nul",
-		.nShow = SW_HIDE,
-	};
-
-	if (ShellExecuteExW(&sei))
+	// Close all connections first so the audio endpoints are released.
+	// Do NOT call DisconnectAllDevices() here — it shows its own modal dialog
+	// and blocks the UI. Instead, close connections inline.
+	for (auto& pair : g_audioPlaybackConnections)
 	{
-		if (sei.hProcess)
-		{
-			WaitForSingleObject(sei.hProcess, 30000);
-			DWORD exitCode = 0;
-			GetExitCodeProcess(sei.hProcess, &exitCode);
-			CloseHandle(sei.hProcess);
+		pair.second.second.Close();
+		g_devicePicker.SetDisplayStatus(pair.second.first, {}, DevicePickerDisplayStatusOptions::None);
+	}
 
-			if (exitCode == 0)
+	g_audioPlaybackConnections.clear();
+
+	// Run the elevated service restart in a background thread to avoid
+	// blocking the UI thread. ShellExecuteExW + WaitForSingleObject can
+	// take up to 30 seconds, which would freeze the application.
+	// The initial Sleep allows async audio endpoint cleanup from Close()
+	// to complete before we stop the audio service, preventing a potential
+	// deadlock where the service stop waits for endpoints we held.
+	std::thread([hwnd = g_hWnd]() {
+		Sleep(1000);
+		SHELLEXECUTEINFOW sei = {
+			.cbSize = sizeof(sei),
+			.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC,
+			.hwnd = hwnd,
+			.lpVerb = L"runas",
+			.lpFile = L"cmd",
+			.lpParameters = L"/c "
+				L"net stop audiosrv /y 2>nul & "
+				L"net stop AudioEndpointBuilder /y 2>nul & "
+				L"net stop BTAGService /y 2>nul & "
+				L"net stop BthAvctpSvc /y 2>nul & "
+				L"net stop bthserv /y 2>nul & "
+				L"net start bthserv 2>nul & "
+				L"net start BthAvctpSvc 2>nul & "
+				L"net start BTAGService 2>nul & "
+				L"net start AudioEndpointBuilder 2>nul & "
+				L"net start audiosrv 2>nul",
+			.nShow = SW_HIDE,
+		};
+
+		WPARAM wParam = 0;
+
+		if (ShellExecuteExW(&sei))
+		{
+			if (sei.hProcess)
 			{
-				TaskDialog(nullptr, nullptr,
-					_(L"Bluetooth Audio Restarted"),
-					nullptr,
-					_(L"Windows Audio and Bluetooth services have been restarted successfully.\n\nPlease reconnect your Bluetooth device now."),
-					TDCBF_OK_BUTTON, TD_INFORMATION_ICON, nullptr);
+				WaitForSingleObject(sei.hProcess, 30000);
+				DWORD exitCode = 0;
+				GetExitCodeProcess(sei.hProcess, &exitCode);
+				CloseHandle(sei.hProcess);
+				wParam = exitCode;
 			}
 			else
 			{
-				TaskDialog(nullptr, nullptr,
-					_(L"Service Restart Failed"),
-					nullptr,
-					_(L"The restart did not complete successfully (the operation may have been cancelled or some services are not available).\n\nIf audio is still not working, please reboot your computer."),
-					TDCBF_OK_BUTTON, TD_ERROR_ICON, nullptr);
+				wParam = 1; // process handle missing
 			}
 		}
-	}
-	else
-	{
-		TaskDialog(nullptr, nullptr,
-			_(L"Service Restart Failed"),
-			nullptr,
-			_(L"Could not restart the audio services.\n\n"
-			  L"This may happen if the elevation prompt was denied.\n\n"
-			  L"If audio is still not working, please reboot your computer."),
-			TDCBF_OK_BUTTON, TD_ERROR_ICON, nullptr);
-	}
+		else
+		{
+			wParam = 2; // ShellExecuteExW failed (elevation denied, etc.)
+		}
+
+		PostMessageW(hwnd, WM_RESTORESERVICE_RESULT, wParam, 0);
+	}).detach();
 }
