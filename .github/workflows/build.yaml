@@ -28,11 +28,18 @@ jobs:
       run: |
         cd translate
         pip install -r requirements.txt
+        chmod +x gen_rc.sh po2ymo.py
+        mkdir -p generated
         ./gen_rc.sh
       shell: bash
 
+    - name: Download NuGet
+      run: |
+        Invoke-WebRequest -Uri https://dist.nuget.org/win-x86-commandline/latest/nuget.exe -OutFile nuget.exe
+      shell: powershell
+
     - name: Restore NuGet packages
-      run: nuget restore AudioPlaybackConnector.sln
+      run: .\nuget.exe restore AudioPlaybackConnector.sln
 
     - name: Build all platforms (parallel)
       run: |
