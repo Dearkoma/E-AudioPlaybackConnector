@@ -79,7 +79,7 @@ jobs:
         path: ARM/Release/AudioPlaybackConnectorARM.exe
 
     - name: Create Release (tag push only)
-      if: always() && startsWith(github.ref, 'refs/tags/')
+      if: startsWith(github.ref, 'refs/tags/')
       uses: softprops/action-gh-release@v2
       with:
         draft: true
