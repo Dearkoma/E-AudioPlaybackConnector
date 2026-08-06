@@ -6,7 +6,7 @@ verify_ssl = true
 [dev-packages]
 
 [packages]
-translate-toolkit = {editable = true,git = "https://github.com/Dearkoma/translate.git"}
+translate-toolkit = "*"
 
 [requires]
 python_version = "3.7"
