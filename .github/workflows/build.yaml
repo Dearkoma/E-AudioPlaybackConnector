@@ -33,66 +33,50 @@ jobs:
         ./gen_rc.sh
       shell: bash
 
-    - name: Download NuGet
+    - name: Restore NuGet packages
       run: |
         Invoke-WebRequest -Uri https://dist.nuget.org/win-x86-commandline/latest/nuget.exe -OutFile nuget.exe
-      shell: powershell
+        .\nuget.exe restore AudioPlaybackConnector.sln
 
-    - name: Restore NuGet packages
-      run: .\nuget.exe restore AudioPlaybackConnector.sln
+    - name: Build x64
+      run: msbuild AudioPlaybackConnector.sln -p:Configuration=Release -p:Platform=x64 -m
 
-    - name: Build all platforms (parallel)
-      run: |
-        Start-Job -Init ([ScriptBlock]::Create("Set-Location '$pwd'")) -Script {
-          msbuild AudioPlaybackConnector.sln "-p:Configuration=Release;Platform=x64" }
-        Start-Job -Init ([ScriptBlock]::Create("Set-Location '$pwd'")) -Script {
-          msbuild AudioPlaybackConnector.sln "-p:Configuration=Release;Platform=x86" }
-        Start-Job -Init ([ScriptBlock]::Create("Set-Location '$pwd'")) -Script {
-          msbuild AudioPlaybackConnector.sln "-p:Configuration=Release;Platform=ARM64" }
-        Start-Job -Init ([ScriptBlock]::Create("Set-Location '$pwd'")) -Script {
-          msbuild AudioPlaybackConnector.sln "-p:Configuration=Release;Platform=ARM" }
-        Get-Job | Wait-Job | Receive-Job
-      shell: powershell
+    - name: Build x86
+      run: msbuild AudioPlaybackConnector.sln -p:Configuration=Release -p:Platform=x86 -m
 
-    - uses: actions/upload-artifact@v4
+    - name: Build ARM64
+      run: msbuild AudioPlaybackConnector.sln -p:Configuration=Release -p:Platform=ARM64 -m
+
+    - name: Build ARM
+      run: msbuild AudioPlaybackConnector.sln -p:Configuration=Release -p:Platform=ARM -m
+
+    - name: Upload x64
+      uses: actions/upload-artifact@v4
+      if: always()
       with:
         name: AudioPlaybackConnector64
         path: x64/Release/AudioPlaybackConnector64.exe
 
-    - uses: actions/upload-artifact@v4
-      with:
-        name: AudioPlaybackConnector64-pdb
-        path: x64/Release/AudioPlaybackConnector64.pdb
-
-    - uses: actions/upload-artifact@v4
+    - name: Upload x86
+      uses: actions/upload-artifact@v4
+      if: always()
       with:
         name: AudioPlaybackConnector32
         path: Release/AudioPlaybackConnector32.exe
 
-    - uses: actions/upload-artifact@v4
-      with:
-        name: AudioPlaybackConnector32-pdb
-        path: Release/AudioPlaybackConnector32.pdb
-
-    - uses: actions/upload-artifact@v4
+    - name: Upload ARM64
+      uses: actions/upload-artifact@v4
+      if: always()
       with:
         name: AudioPlaybackConnectorARM64
         path: ARM64/Release/AudioPlaybackConnectorARM64.exe
 
-    - uses: actions/upload-artifact@v4
-      with:
-        name: AudioPlaybackConnectorARM64-pdb
-        path: ARM64/Release/AudioPlaybackConnectorARM64.pdb
-
-    - uses: actions/upload-artifact@v4
+    - name: Upload ARM
+      uses: actions/upload-artifact@v4
+      if: always()
       with:
         name: AudioPlaybackConnectorARM
         path: ARM/Release/AudioPlaybackConnectorARM.exe
-
-    - uses: actions/upload-artifact@v4
-      with:
-        name: AudioPlaybackConnectorARM-pdb
-        path: ARM/Release/AudioPlaybackConnectorARM.pdb
 
     - name: Create Release (tag push only)
       if: startsWith(github.ref, 'refs/tags/')
