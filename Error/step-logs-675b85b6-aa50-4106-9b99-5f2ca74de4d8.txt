@@ -1,0 +1,38 @@
+﻿2026-08-06T09:51:57.9639185Z ##[group]Run msbuild AudioPlaybackConnector.sln -p:Configuration=Release -p:Platform=x64
+2026-08-06T09:51:57.9639937Z [36;1mmsbuild AudioPlaybackConnector.sln -p:Configuration=Release -p:Platform=x64[0m
+2026-08-06T09:51:57.9711075Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2026-08-06T09:51:57.9711432Z env:
+2026-08-06T09:51:57.9711702Z   pythonLocation: C:\hostedtoolcache\windows\Python\3.12.10\x64
+2026-08-06T09:51:57.9712927Z   PKG_CONFIG_PATH: C:\hostedtoolcache\windows\Python\3.12.10\x64/lib/pkgconfig
+2026-08-06T09:51:57.9713396Z   Python_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+2026-08-06T09:51:57.9713805Z   Python2_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+2026-08-06T09:51:57.9714213Z   Python3_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+2026-08-06T09:51:57.9714542Z ##[endgroup]
+2026-08-06T09:51:58.3252099Z MSBuild version 18.8.2+ce25c0108 for .NET Framework
+2026-08-06T09:51:58.4089709Z Build started 8/6/2026 9:51:58 AM.
+2026-08-06T09:51:58.4219723Z 
+2026-08-06T09:51:58.7461489Z Project "D:\a\E-AudioPlaybackConnector\E-AudioPlaybackConnector\AudioPlaybackConnector.sln" on node 1 (default targets).
+2026-08-06T09:51:58.7462653Z ValidateSolutionConfiguration:
+2026-08-06T09:51:58.7463033Z   Building solution configuration "Release|x64".
+2026-08-06T09:51:59.1491161Z Project "D:\a\E-AudioPlaybackConnector\E-AudioPlaybackConnector\AudioPlaybackConnector.sln" (1) is building "D:\a\E-AudioPlaybackConnector\E-AudioPlaybackConnector\AudioPlaybackConnector.vcxproj" (2) on node 1 (default targets).
+2026-08-06T09:51:59.1492573Z GetCppWinRTProjectWinMDReferences:
+2026-08-06T09:51:59.1492957Z   CppWinRTStaticProjectWinMDReferences: 
+2026-08-06T09:51:59.1493341Z   CppWinRTDynamicProjectWinMDReferences: 
+2026-08-06T09:51:59.1495880Z CppWinRTGetResolvedWinMD:
+2026-08-06T09:51:59.1496368Z   GetResolvedWinMD: 
+2026-08-06T09:51:59.1787260Z C:\Program Files\Microsoft Visual Studio\18\Enterprise\MSBuild\Microsoft\VC\v180\Microsoft.CppBuild.targets(473,5): error MSB8020: The build tools for v180 (Platform Toolset = 'v180') cannot be found. To build using the v180 build tools, please install v180 build tools.  Alternatively, you may upgrade to the current Visual Studio tools by selecting the Project menu or right-click the solution, and then selecting "Retarget solution". [D:\a\E-AudioPlaybackConnector\E-AudioPlaybackConnector\AudioPlaybackConnector.vcxproj]
+2026-08-06T09:51:59.1833787Z Done Building Project "D:\a\E-AudioPlaybackConnector\E-AudioPlaybackConnector\AudioPlaybackConnector.vcxproj" (default targets) -- FAILED.
+2026-08-06T09:51:59.1859352Z Done Building Project "D:\a\E-AudioPlaybackConnector\E-AudioPlaybackConnector\AudioPlaybackConnector.sln" (default targets) -- FAILED.
+2026-08-06T09:51:59.2188753Z 
+2026-08-06T09:51:59.2189277Z Build FAILED.
+2026-08-06T09:51:59.2190994Z 
+2026-08-06T09:51:59.2191840Z "D:\a\E-AudioPlaybackConnector\E-AudioPlaybackConnector\AudioPlaybackConnector.sln" (default target) (1) ->
+2026-08-06T09:51:59.2193230Z "D:\a\E-AudioPlaybackConnector\E-AudioPlaybackConnector\AudioPlaybackConnector.vcxproj" (default target) (2) ->
+2026-08-06T09:51:59.2193966Z (PrepareForBuild target) -> 
+2026-08-06T09:51:59.2196545Z   C:\Program Files\Microsoft Visual Studio\18\Enterprise\MSBuild\Microsoft\VC\v180\Microsoft.CppBuild.targets(473,5): error MSB8020: The build tools for v180 (Platform Toolset = 'v180') cannot be found. To build using the v180 build tools, please install v180 build tools.  Alternatively, you may upgrade to the current Visual Studio tools by selecting the Project menu or right-click the solution, and then selecting "Retarget solution". [D:\a\E-AudioPlaybackConnector\E-AudioPlaybackConnector\AudioPlaybackConnector.vcxproj]
+2026-08-06T09:51:59.2199071Z 
+2026-08-06T09:51:59.2199171Z     0 Warning(s)
+2026-08-06T09:51:59.2199437Z     1 Error(s)
+2026-08-06T09:51:59.2277993Z 
+2026-08-06T09:51:59.2278260Z Time Elapsed 00:00:00.84
+2026-08-06T09:51:59.3754714Z ##[error]Process completed with exit code 1.
