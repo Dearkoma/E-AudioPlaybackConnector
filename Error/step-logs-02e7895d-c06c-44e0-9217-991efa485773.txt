@@ -1,0 +1,52 @@
+﻿2026-08-06T09:26:15.8929812Z ##[group]Run Invoke-WebRequest -Uri https://dist.nuget.org/win-x86-commandline/latest/nuget.exe -OutFile nuget.exe
+2026-08-06T09:26:15.8930808Z [36;1mInvoke-WebRequest -Uri https://dist.nuget.org/win-x86-commandline/latest/nuget.exe -OutFile nuget.exe[0m
+2026-08-06T09:26:15.8931432Z [36;1m.\nuget.exe restore AudioPlaybackConnector.sln[0m
+2026-08-06T09:26:15.9538555Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2026-08-06T09:26:15.9539096Z env:
+2026-08-06T09:26:15.9539553Z   pythonLocation: C:\hostedtoolcache\windows\Python\3.12.10\x64
+2026-08-06T09:26:15.9540158Z   PKG_CONFIG_PATH: C:\hostedtoolcache\windows\Python\3.12.10\x64/lib/pkgconfig
+2026-08-06T09:26:15.9540751Z   Python_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+2026-08-06T09:26:15.9541273Z   Python2_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+2026-08-06T09:26:15.9541817Z   Python3_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+2026-08-06T09:26:15.9542206Z ##[endgroup]
+2026-08-06T09:26:18.8769817Z MSBuild auto-detection: using msbuild version '18.8.2.30814' from 'C:\Program Files\Microsoft Visual Studio\18\Enterprise\MSBuild\Current\Bin'.
+2026-08-06T09:26:28.3596527Z Restoring NuGet package Microsoft.Windows.CppWinRT.2.0.240111.5.
+2026-08-06T09:26:28.3598307Z Restoring NuGet package Microsoft.Windows.ImplementationLibrary.1.0.241002.1.
+2026-08-06T09:26:29.2705667Z   GET https://api.nuget.org/v3-flatcontainer/microsoft.windows.implementationlibrary/1.0.241002.1/microsoft.windows.implementationlibrary.1.0.241002.1.nupkg
+2026-08-06T09:26:29.2707259Z   GET https://api.nuget.org/v3-flatcontainer/microsoft.windows.cppwinrt/2.0.240111.5/microsoft.windows.cppwinrt.2.0.240111.5.nupkg
+2026-08-06T09:26:29.3188430Z   NotFound https://api.nuget.org/v3-flatcontainer/microsoft.windows.implementationlibrary/1.0.241002.1/microsoft.windows.implementationlibrary.1.0.241002.1.nupkg 48ms
+2026-08-06T09:26:29.3284216Z Unable to find version '1.0.241002.1' of package 'Microsoft.Windows.ImplementationLibrary'.
+2026-08-06T09:26:29.3286076Z   C:\Program Files (x86)\Microsoft SDKs\NuGetPackages\: Package 'Microsoft.Windows.ImplementationLibrary.1.0.241002.1' is not found on source 'C:\Program Files (x86)\Microsoft SDKs\NuGetPackages\'.
+2026-08-06T09:26:29.3287966Z   https://api.nuget.org/v3/index.json: Package 'Microsoft.Windows.ImplementationLibrary.1.0.241002.1' is not found on source 'https://api.nuget.org/v3/index.json'.
+2026-08-06T09:26:29.3288739Z 
+2026-08-06T09:26:29.3350996Z   OK https://api.nuget.org/v3-flatcontainer/microsoft.windows.cppwinrt/2.0.240111.5/microsoft.windows.cppwinrt.2.0.240111.5.nupkg 64ms
+2026-08-06T09:26:30.0718173Z Installed Microsoft.Windows.CppWinRT 2.0.240111.5 from https://api.nuget.org/v3/index.json to C:\Users\runneradmin\.nuget\packages\microsoft.windows.cppwinrt\2.0.240111.5 with content hash 3SX5ZVky1AbUAxsMW+xSRB4ytix8G9xSc6qeCiwvU4XIDLECwo3Pt3HETk3VZEB4E3bPKKgh4c4AZZdabUrT2A==.
+2026-08-06T09:26:30.0768238Z Adding package 'Microsoft.Windows.CppWinRT.2.0.240111.5' to folder 'D:\a\E-AudioPlaybackConnector\E-AudioPlaybackConnector\packages'
+2026-08-06T09:26:30.1026081Z Added package 'Microsoft.Windows.CppWinRT.2.0.240111.5' to folder 'D:\a\E-AudioPlaybackConnector\E-AudioPlaybackConnector\packages'
+2026-08-06T09:26:30.1392564Z   GET https://api.nuget.org/v3/vulnerabilities/index.json
+2026-08-06T09:26:30.1877805Z   OK https://api.nuget.org/v3/vulnerabilities/index.json 48ms
+2026-08-06T09:26:30.2496907Z   GET https://api.nuget.org/v3-vulnerabilities/2026.08.04.11.53.37/vulnerability.base.json
+2026-08-06T09:26:30.2509333Z   GET https://api.nuget.org/v3-vulnerabilities/2026.08.04.11.53.37/2026.08.06.05.53.46/vulnerability.update.json
+2026-08-06T09:26:30.2982638Z   OK https://api.nuget.org/v3-vulnerabilities/2026.08.04.11.53.37/2026.08.06.05.53.46/vulnerability.update.json 47ms
+2026-08-06T09:26:30.3435633Z   OK https://api.nuget.org/v3-vulnerabilities/2026.08.04.11.53.37/vulnerability.base.json 93ms
+2026-08-06T09:26:30.4526809Z 
+2026-08-06T09:26:30.4527612Z Errors in packages.config projects
+2026-08-06T09:26:30.4535316Z     Unable to find version '1.0.241002.1' of package 'Microsoft.Windows.ImplementationLibrary'.
+2026-08-06T09:26:30.4536586Z       C:\Program Files (x86)\Microsoft SDKs\NuGetPackages\: Package 'Microsoft.Windows.ImplementationLibrary.1.0.241002.1' is not found on source 'C:\Program Files (x86)\Microsoft SDKs\NuGetPackages\'.
+2026-08-06T09:26:30.4538847Z       https://api.nuget.org/v3/index.json: Package 'Microsoft.Windows.ImplementationLibrary.1.0.241002.1' is not found on source 'https://api.nuget.org/v3/index.json'.
+2026-08-06T09:26:30.4540427Z     Unable to find version '1.0.241002.1' of package 'Microsoft.Windows.ImplementationLibrary'.
+2026-08-06T09:26:30.4541920Z       C:\Program Files (x86)\Microsoft SDKs\NuGetPackages\: Package 'Microsoft.Windows.ImplementationLibrary.1.0.241002.1' is not found on source 'C:\Program Files (x86)\Microsoft SDKs\NuGetPackages\'.
+2026-08-06T09:26:30.4543837Z       https://api.nuget.org/v3/index.json: Package 'Microsoft.Windows.ImplementationLibrary.1.0.241002.1' is not found on source 'https://api.nuget.org/v3/index.json'.
+2026-08-06T09:26:30.4544872Z 
+2026-08-06T09:26:30.4545086Z NuGet Config files used:
+2026-08-06T09:26:30.4546962Z     C:\Users\runneradmin\AppData\Roaming\NuGet\NuGet.Config
+2026-08-06T09:26:30.4548332Z     C:\Program Files (x86)\NuGet\Config\Microsoft.VisualStudio.FallbackLocation.config
+2026-08-06T09:26:30.4549255Z     C:\Program Files (x86)\NuGet\Config\Microsoft.VisualStudio.Offline.config
+2026-08-06T09:26:30.4549665Z 
+2026-08-06T09:26:30.4549899Z Feeds used:
+2026-08-06T09:26:30.4550332Z     https://api.nuget.org/v3/index.json
+2026-08-06T09:26:30.4550854Z     C:\Program Files (x86)\Microsoft SDKs\NuGetPackages\
+2026-08-06T09:26:30.4551277Z 
+2026-08-06T09:26:30.4552388Z Installed:
+2026-08-06T09:26:30.4620992Z     1 package(s) to packages.config projects
+2026-08-06T09:26:30.5506435Z ##[error]Process completed with exit code 1.
