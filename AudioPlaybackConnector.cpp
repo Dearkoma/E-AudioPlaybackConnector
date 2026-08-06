@@ -528,19 +528,21 @@ void DisconnectAllDevices()
 
 	TaskDialog(nullptr, nullptr,
 		_(L"All Devices Disconnected"),
+		nullptr,
 		_(L"All Bluetooth audio connections have been closed.\n\nYou can now reconnect your devices."),
-		nullptr, nullptr, TDCBF_OK_BUTTON, TD_INFORMATION_ICON, nullptr);
+		TDCBF_OK_BUTTON, TD_INFORMATION_ICON, nullptr);
 }
 
 void RestoreAudioService()
 {
 	int result = TaskDialog(nullptr, nullptr,
 		_(L"Restart Windows Audio"),
+		nullptr,
 		_(L"This will restart the Windows Audio service to recover from stuck audio endpoints.\n\n"
 		  L"Administrator permission is required.\n\n"
 		  L"All current audio connections will be lost. You will need to reconnect after the restart.\n\n"
 		  L"Do you want to continue?"),
-		nullptr, nullptr, TDCBF_YES_BUTTON | TDCBF_CANCEL_BUTTON, TD_WARNING_ICON, nullptr);
+		TDCBF_YES_BUTTON | TDCBF_CANCEL_BUTTON, TD_WARNING_ICON, nullptr);
 
 	if (result != IDYES)
 	{
@@ -576,15 +578,17 @@ void RestoreAudioService()
 			{
 				TaskDialog(nullptr, nullptr,
 					_(L"Audio Service Restarted"),
+					nullptr,
 					_(L"Windows Audio has been restarted successfully.\n\nPlease try reconnecting your Bluetooth device now."),
-					nullptr, nullptr, TDCBF_OK_BUTTON, TD_INFORMATION_ICON, nullptr);
+					TDCBF_OK_BUTTON, TD_INFORMATION_ICON, nullptr);
 			}
 			else
 			{
 				TaskDialog(nullptr, nullptr,
 					_(L"Audio Service Restart Failed"),
+					nullptr,
 					_(L"The audio service restart did not complete successfully (the operation may have been cancelled).\n\nIf audio is still not working, please reboot your computer."),
-					nullptr, nullptr, TDCBF_OK_BUTTON, TD_ERROR_ICON, nullptr);
+					TDCBF_OK_BUTTON, TD_ERROR_ICON, nullptr);
 			}
 		}
 	}
@@ -592,9 +596,10 @@ void RestoreAudioService()
 	{
 		TaskDialog(nullptr, nullptr,
 			_(L"Audio Service Restart Failed"),
+			nullptr,
 			_(L"Could not restart the Windows Audio service.\n\n"
 			  L"This may happen if the elevation prompt was denied, or if the service is in an unrecoverable state.\n\n"
 			  L"If audio is still not working, please reboot your computer."),
-			nullptr, nullptr, TDCBF_OK_BUTTON, TD_ERROR_ICON, nullptr);
+			TDCBF_OK_BUTTON, TD_ERROR_ICON, nullptr);
 	}
 }
