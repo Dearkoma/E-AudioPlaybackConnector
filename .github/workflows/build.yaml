@@ -63,10 +63,9 @@ jobs:
 
     - name: Create Release (tag push only)
       if: startsWith(github.ref, 'refs/tags/')
-      shell: bash
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: |
-        set -e
-        ls -la x64/Release/AudioPlaybackConnector64.exe Release/AudioPlaybackConnector32.exe
-        gh release create "${{ github.ref_name }}" x64/Release/AudioPlaybackConnector64.exe Release/AudioPlaybackConnector32.exe --draft --title "${{ github.ref_name }}" --notes "Build artifacts for ${{ github.ref_name }}"
+      uses: ncipollo/release-action@v1
+      with:
+        artifacts: "x64/Release/AudioPlaybackConnector64.exe,Release/AudioPlaybackConnector32.exe"
+        draft: true
+        generateReleaseNotes: true
+        token: ${{ secrets.GITHUB_TOKEN }}
