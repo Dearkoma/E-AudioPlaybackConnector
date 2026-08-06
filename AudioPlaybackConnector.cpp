@@ -104,32 +104,34 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	{
 	case WM_DESTROY:
 	{
-		// Close all active audio connections first
-		for (const auto& connection : g_audioPlaybackConnections)
-		{
-			connection.second.second.Close();
-			g_devicePicker.SetDisplayStatus(connection.second.first, {}, DevicePickerDisplayStatusOptions::None);
-		}
+		// Signal all async operations to stop — prevents pending
+		// coroutines (ConnectDevice, RestoreAudioService) from
+		// touching resources we are about to release.
+		g_shuttingDown = true;
 
-		if (g_reconnect)
-		{
-			// Save the device list for reconnect before clearing
-			SaveSettings();
-		}
+		// Save settings while we still have the connection list intact
+		SaveSettings();
 
-		// Brief wait to let Windows complete async audio endpoint cleanup.
-		// Without this, the process may exit before the OS releases audio
-		// resources, leaving zombie endpoints that require a reboot to recover.
-		// 500ms is typically sufficient for the Bluetooth audio stack to finalize.
+		// Close all audio connections and release endpoints.
+		// Each Close() triggers async cleanup; the StateChanged
+		// callback may fire later, but since we clear the map
+		// after closing, it will find nothing and be harmless.
+		for (auto& pair : g_audioPlaybackConnections)
+		{
+			pair.second.second.Close();
+			g_devicePicker.SetDisplayStatus(pair.second.first, {}, DevicePickerDisplayStatusOptions::None);
+		}
+		g_audioPlaybackConnections.clear();
+
+		// Remove tray icon
+		Shell_NotifyIconW(NIM_DELETE, &g_nid);
+
+		// Allow time for async audio endpoint cleanup to propagate
+		// before the process exits. Without this delay, the OS may
+		// not release endpoints in time, leaving zombie entries that
+		// require a reboot to recover.
 		Sleep(500);
 
-		if (!g_reconnect)
-		{
-			SaveSettings();
-		}
-
-		g_audioPlaybackConnections.clear();
-		Shell_NotifyIconW(NIM_DELETE, &g_nid);
 		PostQuitMessage(0);
 		break;
 	}
@@ -340,6 +342,8 @@ void SetupMenu()
 
 winrt::fire_and_forget ConnectDevice(DevicePicker picker, DeviceInformation device)
 {
+	if (g_shuttingDown) co_return;
+
 	picker.SetDisplayStatus(device, _(L"Connecting"), DevicePickerDisplayStatusOptions::ShowProgress | DevicePickerDisplayStatusOptions::ShowDisconnectButton);
 
 	bool success = false;
@@ -438,6 +442,8 @@ winrt::fire_and_forget ConnectDevice(DevicePicker picker, DeviceInformation devi
 
 winrt::fire_and_forget ConnectDevice(DevicePicker picker, std::wstring_view deviceId)
 {
+	if (g_shuttingDown) co_return;
+
 	auto device = co_await DeviceInformation::CreateFromIdAsync(deviceId);
 	ConnectDevice(picker, device);
 }
@@ -570,6 +576,9 @@ winrt::fire_and_forget RestoreAudioService()
 	// Without this, the old endpoint may still be releasing resources when
 	// we try to open a new one for the same device.
 	co_await winrt::resume_after(std::chrono::seconds(1));
+
+	// If the user exited during the wait, don't reconnect
+	if (g_shuttingDown) co_return;
 
 	// Reconnect each device that was previously connected
 	for (const auto& id : deviceIds)

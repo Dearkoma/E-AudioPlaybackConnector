@@ -36,6 +36,7 @@ NOTIFYICONIDENTIFIER g_niid = {
 };
 UINT WM_TASKBAR_CREATED = 0;
 bool g_reconnect = false;
+bool g_shuttingDown = false;
 std::vector<std::wstring> g_lastDevices;
 
 #include "Util.hpp"
