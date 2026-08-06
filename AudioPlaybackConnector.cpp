@@ -308,7 +308,7 @@ void SetupMenu()
 	repairIcon.Glyph(L"\xE72C"); // Repair
 
 	MenuFlyoutItem restartAudioItem;
-	restartAudioItem.Text(_(L"Restart Windows Audio"));
+	restartAudioItem.Text(_(L"Restart Bluetooth Audio"));
 	restartAudioItem.Icon(repairIcon);
 	restartAudioItem.Click([](const auto&, const auto&) {
 		RestoreAudioService();
@@ -536,11 +536,11 @@ void DisconnectAllDevices()
 void RestoreAudioService()
 {
 	int result = TaskDialog(nullptr, nullptr,
-		_(L"Restart Windows Audio"),
+		_(L"Restart Bluetooth Audio"),
 		nullptr,
-		_(L"This will restart the Windows Audio service to recover from stuck audio endpoints.\n\n"
+		_(L"This will restart Windows Audio and Bluetooth audio services to recover from stuck or silent connections.\n\n"
 		  L"Administrator permission is required.\n\n"
-		  L"All current audio connections will be lost. You will need to reconnect after the restart.\n\n"
+		  L"All current audio connections will be lost. You will need to reconnect your Bluetooth device after the restart.\n\n"
 		  L"Do you want to continue?"),
 		TDCBF_YES_BUTTON | TDCBF_CANCEL_BUTTON, TD_WARNING_ICON, nullptr);
 
@@ -552,16 +552,26 @@ void RestoreAudioService()
 	// Close all connections first so the audio endpoints are released
 	DisconnectAllDevices();
 
-	// Use cmd to chain the service restart commands.
-	// Stop order: audiosrv first (this cascades to AudioEndpointBuilder),
-	// then start AudioEndpointBuilder then audiosrv.
+	// Restart audio and Bluetooth services together.
+	// Stop order: audio services first, then Bluetooth.
+	// Start order: Bluetooth first, then audio.
 	SHELLEXECUTEINFOW sei = {
 		.cbSize = sizeof(sei),
 		.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC,
 		.hwnd = g_hWnd,
 		.lpVerb = L"runas",
 		.lpFile = L"cmd",
-		.lpParameters = L"/c net stop audiosrv /y >nul 2>&1 & net stop AudioEndpointBuilder /y >nul 2>&1 & net start AudioEndpointBuilder >nul 2>&1 & net start audiosrv >nul 2>&1",
+		.lpParameters = L"/c "
+			L"net stop audiosrv /y 2>nul & "
+			L"net stop AudioEndpointBuilder /y 2>nul & "
+			L"net stop BTAGService /y 2>nul & "
+			L"net stop BthAvctpSvc /y 2>nul & "
+			L"net stop bthserv /y 2>nul & "
+			L"net start bthserv 2>nul & "
+			L"net start BthAvctpSvc 2>nul & "
+			L"net start BTAGService 2>nul & "
+			L"net start AudioEndpointBuilder 2>nul & "
+			L"net start audiosrv 2>nul",
 		.nShow = SW_HIDE,
 	};
 
@@ -569,7 +579,7 @@ void RestoreAudioService()
 	{
 		if (sei.hProcess)
 		{
-			WaitForSingleObject(sei.hProcess, 20000);
+			WaitForSingleObject(sei.hProcess, 30000);
 			DWORD exitCode = 0;
 			GetExitCodeProcess(sei.hProcess, &exitCode);
 			CloseHandle(sei.hProcess);
@@ -577,17 +587,17 @@ void RestoreAudioService()
 			if (exitCode == 0)
 			{
 				TaskDialog(nullptr, nullptr,
-					_(L"Audio Service Restarted"),
+					_(L"Bluetooth Audio Restarted"),
 					nullptr,
-					_(L"Windows Audio has been restarted successfully.\n\nPlease try reconnecting your Bluetooth device now."),
+					_(L"Windows Audio and Bluetooth services have been restarted successfully.\n\nPlease reconnect your Bluetooth device now."),
 					TDCBF_OK_BUTTON, TD_INFORMATION_ICON, nullptr);
 			}
 			else
 			{
 				TaskDialog(nullptr, nullptr,
-					_(L"Audio Service Restart Failed"),
+					_(L"Service Restart Failed"),
 					nullptr,
-					_(L"The audio service restart did not complete successfully (the operation may have been cancelled).\n\nIf audio is still not working, please reboot your computer."),
+					_(L"The restart did not complete successfully (the operation may have been cancelled or some services are not available).\n\nIf audio is still not working, please reboot your computer."),
 					TDCBF_OK_BUTTON, TD_ERROR_ICON, nullptr);
 			}
 		}
@@ -595,10 +605,10 @@ void RestoreAudioService()
 	else
 	{
 		TaskDialog(nullptr, nullptr,
-			_(L"Audio Service Restart Failed"),
+			_(L"Service Restart Failed"),
 			nullptr,
-			_(L"Could not restart the Windows Audio service.\n\n"
-			  L"This may happen if the elevation prompt was denied, or if the service is in an unrecoverable state.\n\n"
+			_(L"Could not restart the audio services.\n\n"
+			  L"This may happen if the elevation prompt was denied.\n\n"
 			  L"If audio is still not working, please reboot your computer."),
 			TDCBF_OK_BUTTON, TD_ERROR_ICON, nullptr);
 	}
