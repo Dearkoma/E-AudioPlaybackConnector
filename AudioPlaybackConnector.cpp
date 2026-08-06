@@ -9,7 +9,7 @@ void SetupDevicePicker();
 void SetupSvgIcon();
 void UpdateNotifyIcon();
 void DisconnectAllDevices();
-void RestoreAudioService();
+winrt::fire_and_forget RestoreAudioService();
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 	_In_opt_ HINSTANCE hPrevInstance,
@@ -201,36 +201,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			g_lastDevices.clear();
 		}
 		break;
-	case WM_RESTORESERVICE_RESULT:
-	{
-		if (wParam == 0)
-		{
-			TaskDialog(nullptr, nullptr,
-				_(L"Bluetooth Audio Restarted"),
-				nullptr,
-				_(L"Windows Audio and Bluetooth services have been restarted successfully.\n\nPlease reconnect your Bluetooth device now."),
-				TDCBF_OK_BUTTON, TD_INFORMATION_ICON, nullptr);
-		}
-		else if (wParam == 2)
-		{
-			TaskDialog(nullptr, nullptr,
-				_(L"Service Restart Failed"),
-				nullptr,
-				_(L"Could not restart the audio services.\n\n"
-				  L"This may happen if the elevation prompt was denied.\n\n"
-				  L"If audio is still not working, please reboot your computer."),
-				TDCBF_OK_BUTTON, TD_ERROR_ICON, nullptr);
-		}
-		else
-		{
-			TaskDialog(nullptr, nullptr,
-				_(L"Service Restart Failed"),
-				nullptr,
-				_(L"The restart did not complete successfully (the operation may have been cancelled or some services are not available).\n\nIf audio is still not working, please reboot your computer."),
-				TDCBF_OK_BUTTON, TD_ERROR_ICON, nullptr);
-		}
-		break;
-	}
 	default:
 		if (WM_TASKBAR_CREATED && message == WM_TASKBAR_CREATED)
 		{
@@ -563,82 +533,47 @@ void DisconnectAllDevices()
 		TDCBF_OK_BUTTON, TD_INFORMATION_ICON, nullptr);
 }
 
-void RestoreAudioService()
+winrt::fire_and_forget RestoreAudioService()
 {
+	if (g_audioPlaybackConnections.empty())
+	{
+		co_return;
+	}
+
 	int result = TaskDialog(nullptr, nullptr,
 		_(L"Restart Bluetooth Audio"),
 		nullptr,
-		_(L"This will restart Windows Audio and Bluetooth audio services to recover from stuck or silent connections.\n\n"
-		  L"Administrator permission is required.\n\n"
-		  L"Only audio services are restarted — other Bluetooth devices (mouse, keyboard, etc.) will NOT be affected.\n\n"
-		  L"Current audio connections will be closed. You will need to reconnect your Bluetooth audio device after the restart.\n\n"
+		_(L"This will disconnect and reconnect the audio connections managed by AudioPlaybackConnector.\n\n"
+		  L"No system services are touched — only this app's own connections are affected.\n"
+		  L"Other Bluetooth devices (mouse, keyboard, etc.) will NOT be interrupted.\n\n"
 		  L"Do you want to continue?"),
-		TDCBF_YES_BUTTON | TDCBF_CANCEL_BUTTON, TD_WARNING_ICON, nullptr);
+		TDCBF_YES_BUTTON | TDCBF_CANCEL_BUTTON, TD_INFORMATION_ICON, nullptr);
 
 	if (result != IDYES)
 	{
-		return;
+		co_return;
 	}
 
-	// Close all connections first so the audio endpoints are released.
-	// Do NOT call DisconnectAllDevices() here — it shows its own modal dialog
-	// and blocks the UI. Instead, close connections inline.
-	for (auto& pair : g_audioPlaybackConnections)
+	// Save device IDs before closing so we can reconnect
+	std::vector<std::wstring> deviceIds;
+	deviceIds.reserve(g_audioPlaybackConnections.size());
+	for (const auto& pair : g_audioPlaybackConnections)
 	{
+		deviceIds.push_back(pair.first);
 		pair.second.second.Close();
 		g_devicePicker.SetDisplayStatus(pair.second.first, {}, DevicePickerDisplayStatusOptions::None);
 	}
 
 	g_audioPlaybackConnections.clear();
 
-	// Run the elevated service restart in a background thread to avoid
-	// blocking the UI thread. ShellExecuteExW + WaitForSingleObject can
-	// take up to 30 seconds, which would freeze the application.
-	// The initial Sleep allows async audio endpoint cleanup from Close()
-	// to complete before we stop the audio service, preventing a potential
-	// deadlock where the service stop waits for endpoints we held.
-	std::thread([hwnd = g_hWnd]() {
-		Sleep(1000);
-		SHELLEXECUTEINFOW sei = {
-			.cbSize = sizeof(sei),
-			.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC,
-			.hwnd = hwnd,
-			.lpVerb = L"runas",
-			.lpFile = L"cmd",
-			.lpParameters = L"/c "
-				L"net stop audiosrv /y 2>nul & "
-				L"net stop AudioEndpointBuilder /y 2>nul & "
-				L"net stop BTAGService /y 2>nul & "
-				L"net stop BthAvctpSvc /y 2>nul & "
-				L"net start BthAvctpSvc 2>nul & "
-				L"net start BTAGService 2>nul & "
-				L"net start AudioEndpointBuilder 2>nul & "
-				L"net start audiosrv 2>nul",
-			.nShow = SW_HIDE,
-		};
+	// Wait for async audio endpoint cleanup to complete before reconnecting.
+	// Without this, the old endpoint may still be releasing resources when
+	// we try to open a new one for the same device.
+	co_await winrt::resume_after(std::chrono::seconds(1));
 
-		WPARAM wParam = 0;
-
-		if (ShellExecuteExW(&sei))
-		{
-			if (sei.hProcess)
-			{
-				WaitForSingleObject(sei.hProcess, 30000);
-				DWORD exitCode = 0;
-				GetExitCodeProcess(sei.hProcess, &exitCode);
-				CloseHandle(sei.hProcess);
-				wParam = exitCode;
-			}
-			else
-			{
-				wParam = 1; // process handle missing
-			}
-		}
-		else
-		{
-			wParam = 2; // ShellExecuteExW failed (elevation denied, etc.)
-		}
-
-		PostMessageW(hwnd, WM_RESTORESERVICE_RESULT, wParam, 0);
-	}).detach();
+	// Reconnect each device that was previously connected
+	for (const auto& id : deviceIds)
+	{
+		ConnectDevice(g_devicePicker, id);
+	}
 }

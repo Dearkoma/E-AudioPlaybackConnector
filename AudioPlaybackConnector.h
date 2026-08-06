@@ -13,7 +13,6 @@ namespace fs = std::filesystem;
 
 constexpr UINT WM_NOTIFYICON = WM_APP + 1;
 constexpr UINT WM_CONNECTDEVICE = WM_APP + 2;
-constexpr UINT WM_RESTORESERVICE_RESULT = WM_APP + 3;
 
 HINSTANCE g_hInst;
 HWND g_hWnd;

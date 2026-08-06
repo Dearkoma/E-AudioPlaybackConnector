@@ -20,9 +20,9 @@
 #include <shlwapi.h>
 
 // C++ RunTime Header Files
+#include <chrono>
 #include <cstdlib>
 #include <cstdint>
-#include <thread>
 #include <unordered_map>
 #include <filesystem>
 
