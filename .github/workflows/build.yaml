@@ -11,6 +11,7 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
     - uses: actions/checkout@v4
       with:
@@ -39,17 +40,13 @@ jobs:
         .\nuget.exe restore AudioPlaybackConnector.sln
 
     - name: Build x64
-      run: msbuild AudioPlaybackConnector.sln -p:Configuration=Release -p:Platform=x64 -m
-
+      run: msbuild AudioPlaybackConnector.sln -p:Configuration=Release -p:Platform=x64
     - name: Build x86
-      run: msbuild AudioPlaybackConnector.sln -p:Configuration=Release -p:Platform=x86 -m
-
+      run: msbuild AudioPlaybackConnector.sln -p:Configuration=Release -p:Platform=x86
     - name: Build ARM64
-      run: msbuild AudioPlaybackConnector.sln -p:Configuration=Release -p:Platform=ARM64 -m
-
+      run: msbuild AudioPlaybackConnector.sln -p:Configuration=Release -p:Platform=ARM64
     - name: Build ARM
-      run: msbuild AudioPlaybackConnector.sln -p:Configuration=Release -p:Platform=ARM -m
-
+      run: msbuild AudioPlaybackConnector.sln -p:Configuration=Release -p:Platform=ARM
     - name: Upload x64
       uses: actions/upload-artifact@v4
       if: always()
