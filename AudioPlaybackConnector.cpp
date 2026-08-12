@@ -39,7 +39,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 	}
 	if (!supported)
 	{
-		TaskDialog(nullptr, nullptr, _(L"操作系统不支持"), nullptr, _(L"此操作系统版本不支持 AudioPlaybackConnector。"), TDCBF_OK_BUTTON, TD_ERROR_ICON, nullptr);
+		TaskDialog(nullptr, nullptr, _(L"Unsupported Operating System"), nullptr, _(L"AudioPlaybackConnector is not supported on this operating system version."), TDCBF_OK_BUTTON, TD_ERROR_ICON, nullptr);
 		return EXIT_FAILURE;
 	}
 
@@ -234,15 +234,15 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 void SetupFlyout()
 {
 	TextBlock textBlock;
-	textBlock.Text(_(L"所有连接将被关闭。\n确定退出吗？"));
+	textBlock.Text(_(L"All connections will be closed.\nExit anyway?"));
 	textBlock.Margin({ 0, 0, 0, 12 });
 
 	static CheckBox checkbox;
 	checkbox.IsChecked(g_reconnect);
-	checkbox.Content(winrt::box_value(_(L"下次启动时重新连接")));
+	checkbox.Content(winrt::box_value(_(L"Reconnect on next start")));
 
 	Button button;
-	button.Content(winrt::box_value(_(L"退出")));
+	button.Content(winrt::box_value(_(L"Exit")));
 	button.HorizontalAlignment(HorizontalAlignment::Right);
 	button.Click([](const auto&, const auto&) {
 		g_reconnect = checkbox.IsChecked().Value();
@@ -268,7 +268,7 @@ void SetupMenu()
 	settingsIcon.Glyph(L"\xE713");
 
 	MenuFlyoutItem settingsItem;
-	settingsItem.Text(_(L"蓝牙设置"));
+	settingsItem.Text(_(L"Bluetooth Settings"));
 	settingsItem.Icon(settingsIcon);
 	settingsItem.Click([](const auto&, const auto&) {
 		winrt::Windows::System::Launcher::LaunchUriAsync(Uri(L"ms-settings:bluetooth"));
@@ -278,7 +278,7 @@ void SetupMenu()
 	closeIcon.Glyph(L"\xE8BB");
 
 	MenuFlyoutItem exitItem;
-	exitItem.Text(_(L"退出"));
+	exitItem.Text(_(L"Exit"));
 	exitItem.Icon(closeIcon);
 	exitItem.Click([](const auto&, const auto&) {
 		bool hasConnections;
@@ -312,6 +312,44 @@ void SetupMenu()
 	MenuFlyout menu;
 	menu.Items().Append(settingsItem);
 
+	// --- Language ---
+	FontIcon langIcon;
+	langIcon.Glyph(L"\xE8B1"); // Globe
+
+	MenuFlyoutSubItem langSubItem;
+	langSubItem.Text(_(L"Language"));
+	langSubItem.Icon(langIcon);
+
+	MenuFlyoutItem langEnItem;
+	langEnItem.Text(L"English");
+	langEnItem.Click([](const auto&, const auto&) {
+		if (g_language == L"en") return;
+		g_language = L"en";
+		SaveSettings();
+		TaskDialog(nullptr, nullptr,
+			_(L"Language Changed"),
+			nullptr,
+			_(L"Language has been set to English. Please restart AudioPlaybackConnector for the change to take effect."),
+			TDCBF_OK_BUTTON, TD_INFORMATION_ICON, nullptr);
+	});
+
+	MenuFlyoutItem langZhItem;
+	langZhItem.Text(L"中文");
+	langZhItem.Click([](const auto&, const auto&) {
+		if (g_language == L"zh-CN") return;
+		g_language = L"zh-CN";
+		SaveSettings();
+		TaskDialog(nullptr, nullptr,
+			_(L"Language Changed"),
+			nullptr,
+			_(L"Language has been set to Chinese. Please restart AudioPlaybackConnector for the change to take effect."),
+			TDCBF_OK_BUTTON, TD_INFORMATION_ICON, nullptr);
+	});
+
+	langSubItem.Items().Append(langEnItem);
+	langSubItem.Items().Append(langZhItem);
+	menu.Items().Append(langSubItem);
+
 	// --- Disconnect All ---
 	MenuFlyoutSeparator separator1;
 
@@ -319,7 +357,7 @@ void SetupMenu()
 	disconnectIcon.Glyph(L"\xE894"); // DisconnectDrive
 
 	MenuFlyoutItem disconnectAllItem;
-	disconnectAllItem.Text(_(L"断开全部"));
+	disconnectAllItem.Text(_(L"Disconnect All"));
 	disconnectAllItem.Icon(disconnectIcon);
 	disconnectAllItem.Click([](const auto&, const auto&) {
 		DisconnectAllDevices();
@@ -333,7 +371,7 @@ void SetupMenu()
 	repairIcon.Glyph(L"\xE72C"); // Repair
 
 	MenuFlyoutItem restartAudioItem;
-	restartAudioItem.Text(_(L"重启蓝牙音频"));
+	restartAudioItem.Text(_(L"Restart Bluetooth Audio"));
 	restartAudioItem.Icon(repairIcon);
 	restartAudioItem.Click([](const auto&, const auto&) {
 		RestoreAudioService();
@@ -367,7 +405,7 @@ winrt::fire_and_forget ConnectDevice(DevicePicker picker, DeviceInformation devi
 {
 	if (g_shuttingDown) co_return;
 
-	picker.SetDisplayStatus(device, _(L"正在连接"), DevicePickerDisplayStatusOptions::ShowProgress | DevicePickerDisplayStatusOptions::ShowDisconnectButton);
+	picker.SetDisplayStatus(device, _(L"Connecting"), DevicePickerDisplayStatusOptions::ShowProgress | DevicePickerDisplayStatusOptions::ShowDisconnectButton);
 
 	bool success = false;
 	std::wstring errorMessage;
@@ -404,11 +442,11 @@ winrt::fire_and_forget ConnectDevice(DevicePicker picker, DeviceInformation devi
 				break;
 			case AudioPlaybackConnectionOpenResultStatus::RequestTimedOut:
 				success = false;
-				errorMessage = _(L"请求超时");
+				errorMessage = _(L"The request timed out");
 				break;
 			case AudioPlaybackConnectionOpenResultStatus::DeniedBySystem:
 				success = false;
-				errorMessage = _(L"操作被系统拒绝");
+				errorMessage = _(L"The operation was denied by the system");
 				break;
 			case AudioPlaybackConnectionOpenResultStatus::UnknownFailure:
 				success = false;
@@ -419,7 +457,7 @@ winrt::fire_and_forget ConnectDevice(DevicePicker picker, DeviceInformation devi
 		else
 		{
 			success = false;
-			errorMessage = _(L"未知错误");
+			errorMessage = _(L"Unknown error");
 		}
 	}
 	catch (winrt::hresult_error const& ex)
@@ -444,7 +482,7 @@ winrt::fire_and_forget ConnectDevice(DevicePicker picker, DeviceInformation devi
 
 	if (success)
 	{
-		picker.SetDisplayStatus(device, _(L"已连接"), DevicePickerDisplayStatusOptions::ShowDisconnectButton);
+		picker.SetDisplayStatus(device, _(L"Connected"), DevicePickerDisplayStatusOptions::ShowDisconnectButton);
 	}
 	else
 	{
@@ -564,9 +602,9 @@ void DisconnectAllDevices()
 	}
 
 	TaskDialog(nullptr, nullptr,
-		_(L"所有设备已断开"),
+		_(L"All Devices Disconnected"),
 		nullptr,
-		_(L"所有蓝牙音频连接已关闭。\n\n现在可以重新连接设备。"),
+		_(L"All Bluetooth audio connections have been closed.\n\nYou can now reconnect your devices."),
 		TDCBF_OK_BUTTON, TD_INFORMATION_ICON, nullptr);
 }
 
@@ -581,12 +619,12 @@ winrt::fire_and_forget RestoreAudioService()
 	}
 
 	int result = TaskDialog(nullptr, nullptr,
-		_(L"重启蓝牙音频"),
+		_(L"Restart Bluetooth Audio"),
 		nullptr,
-		_(L"这将断开并重新连接由 AudioPlaybackConnector 管理的音频连接。\n\n"
-		  L"不会触及其他系统服务 — 仅影响本程序自身的连接。\n"
-		  L"其他蓝牙设备（鼠标、键盘等）不会中断。\n\n"
-		  L"是否继续？"),
+		_(L"This will disconnect and reconnect the audio connections managed by AudioPlaybackConnector.\n\n"
+		  L"No system services are touched — only this app's own connections are affected.\n"
+		  L"Other Bluetooth devices (mouse, keyboard, etc.) will NOT be interrupted.\n\n"
+		  L"Do you want to continue?"),
 		TDCBF_YES_BUTTON | TDCBF_CANCEL_BUTTON, TD_INFORMATION_ICON, nullptr);
 
 	if (result != IDYES)

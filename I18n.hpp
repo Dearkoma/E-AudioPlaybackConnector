@@ -15,9 +15,34 @@ struct YMOData
 };
 #pragma pack(pop)
 
+// External: set by the language menu, persisted in settings.
+// Empty = auto-detect from system. "en" = English, "zh-CN" = Simplified Chinese.
+extern std::wstring g_language;
+
+LANGID LanguageToLangId(const std::wstring& lang)
+{
+	if (lang == L"zh-CN")  return MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED);
+	if (lang == L"zh-TW")  return MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_TRADITIONAL);
+	return MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US);
+}
+
+void ClearTranslations()
+{
+	hashToStrMap.clear();
+}
+
 void LoadTranslateData()
 {
-	auto hRes = FindResourceExW(g_hInst, L"YMO", MAKEINTRESOURCEW(1), GetThreadUILanguage());
+	// Clear previous translations if reloading
+	hashToStrMap.clear();
+
+	LANGID langId;
+	if (!g_language.empty())
+		langId = LanguageToLangId(g_language);
+	else
+		langId = GetThreadUILanguage();
+
+	auto hRes = FindResourceExW(g_hInst, L"YMO", MAKEINTRESOURCEW(1), langId);
 	if (hRes)
 	{
 		auto hResData = LoadResource(g_hInst, hRes);

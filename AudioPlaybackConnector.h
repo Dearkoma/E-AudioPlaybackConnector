@@ -41,6 +41,7 @@ UINT WM_TASKBAR_CREATED = 0;
 bool g_reconnect = false;
 bool g_shuttingDown = false;
 std::vector<std::wstring> g_lastDevices;
+std::wstring g_language; // "" = auto, "en" = English, "zh-CN" = 简体中文
 
 #include "Util.hpp"
 #include "I18n.hpp"

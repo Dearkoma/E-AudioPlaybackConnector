@@ -7,6 +7,7 @@ void DefaultSettings()
 {
 	g_reconnect = false;
 	g_lastDevices.clear();
+	g_language.clear(); // auto-detect
 }
 
 void LoadSettings()
@@ -34,6 +35,10 @@ void LoadSettings()
 		auto jsonObj = JsonObject::Parse(utf16);
 		g_reconnect = jsonObj.Lookup(L"reconnect").GetBoolean();
 
+		auto language = jsonObj.TryLookup(L"language");
+		if (language && language.ValueType() == JsonValueType::String)
+			g_language = std::wstring(language.GetString());
+
 		auto lastDevices = jsonObj.Lookup(L"lastDevices").GetArray();
 		g_lastDevices.reserve(lastDevices.Size());
 		for (const auto& i : lastDevices)
@@ -51,6 +56,8 @@ void SaveSettings()
 	{
 		JsonObject jsonObj;
 		jsonObj.Insert(L"reconnect", JsonValue::CreateBooleanValue(g_reconnect));
+		if (!g_language.empty())
+			jsonObj.Insert(L"language", JsonValue::CreateStringValue(g_language));
 
 		JsonArray lastDevices;
 		{
