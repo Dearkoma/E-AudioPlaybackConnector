@@ -10,6 +10,7 @@ void SetupSvgIcon();
 void UpdateNotifyIcon();
 void DisconnectAllDevices();
 winrt::fire_and_forget RestoreAudioService();
+void RebuildUi();
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 	_In_opt_ HINSTANCE hPrevInstance,
@@ -237,14 +238,14 @@ void SetupFlyout()
 	textBlock.Text(_(L"All connections will be closed.\nExit anyway?"));
 	textBlock.Margin({ 0, 0, 0, 12 });
 
-	static CheckBox checkbox;
+	CheckBox checkbox;
 	checkbox.IsChecked(g_reconnect);
 	checkbox.Content(winrt::box_value(_(L"Reconnect on next start")));
 
 	Button button;
 	button.Content(winrt::box_value(_(L"Exit")));
 	button.HorizontalAlignment(HorizontalAlignment::Right);
-	button.Click([](const auto&, const auto&) {
+	button.Click([checkbox](const auto&, const auto&) {
 		g_reconnect = checkbox.IsChecked().Value();
 		PostMessageW(g_hWnd, WM_CLOSE, 0, 0);
 	});
@@ -326,11 +327,7 @@ void SetupMenu()
 		if (g_language == L"en") return;
 		g_language = L"en";
 		SaveSettings();
-		TaskDialog(nullptr, nullptr,
-			_(L"Language Changed"),
-			nullptr,
-			_(L"Language has been set to English. Please restart AudioPlaybackConnector for the change to take effect."),
-			TDCBF_OK_BUTTON, TD_INFORMATION_ICON, nullptr);
+		RebuildUi();
 	});
 
 	MenuFlyoutItem langZhItem;
@@ -339,11 +336,7 @@ void SetupMenu()
 		if (g_language == L"zh-CN") return;
 		g_language = L"zh-CN";
 		SaveSettings();
-		TaskDialog(nullptr, nullptr,
-			_(L"Language Changed"),
-			nullptr,
-			_(L"Language has been set to Chinese. Please restart AudioPlaybackConnector for the change to take effect."),
-			TDCBF_OK_BUTTON, TD_INFORMATION_ICON, nullptr);
+		RebuildUi();
 	});
 
 	langSubItem.Items().Append(langEnItem);
@@ -399,6 +392,17 @@ void SetupMenu()
 	});
 
 	g_xamlMenu = menu;
+}
+
+void RebuildUi()
+{
+	// Reload the translation maps for the newly selected language,
+	// then reconstruct all UI that was built with translated strings.
+	ReloadTranslations();
+	SetupFlyout();
+	SetupMenu();
+	wcscpy_s(g_nid.szTip, _(L"AudioPlaybackConnector"));
+	UpdateNotifyIcon();
 }
 
 winrt::fire_and_forget ConnectDevice(DevicePicker picker, DeviceInformation device)

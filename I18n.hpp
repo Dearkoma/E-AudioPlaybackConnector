@@ -42,9 +42,6 @@ void BuildChineseMap()
 	                      L"不会触及其他系统服务 — 仅影响本程序自身的连接。\n"
 	                      L"其他蓝牙设备（鼠标、键盘等）不会中断。\n\n"
 	                      L"是否继续？");
-	hashToStrMap.emplace(H(L"Language Changed"), L"语言已更改");
-	hashToStrMap.emplace(H(L"Language has been set to English. Please restart AudioPlaybackConnector for the change to take effect."), L"语言已设置为英文。请重启 AudioPlaybackConnector 以生效。");
-	hashToStrMap.emplace(H(L"Language has been set to Chinese. Please restart AudioPlaybackConnector for the change to take effect."), L"语言已设置为中文。请重启 AudioPlaybackConnector 以生效。");
 
 	#undef H
 }
@@ -114,10 +111,10 @@ void LoadTranslateData()
 	}
 }
 
+std::unordered_map<const wchar_t*, const wchar_t*> ptrToStrMap;
+
 const wchar_t* Translate(const wchar_t* str)
 {
-	static std::unordered_map<const wchar_t*, const wchar_t*> ptrToStrMap;
-
 	auto translation = str;
 
 	auto i = ptrToStrMap.find(str);
@@ -134,6 +131,14 @@ const wchar_t* Translate(const wchar_t* str)
 		translation = i->second;
 
 	return translation;
+}
+
+// Clear both caches and reload translations for the current language,
+// then let the caller rebuild any UI that was already constructed.
+void ReloadTranslations()
+{
+	ptrToStrMap.clear();
+	LoadTranslateData();
 }
 
 const wchar_t* TranslateContext(const wchar_t* str, const wchar_t* ctxtStr)
