@@ -353,7 +353,6 @@
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="AudioPlaybackConnector.rc" />
-    <ResourceCompile Include="translate\generated\translate.rc" />
   </ItemGroup>
   <ItemGroup>
     <Image Include="AudioPlaybackConnector.ico" />

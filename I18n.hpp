@@ -1,7 +1,53 @@
 #pragma once
 #include "FnvHash.hpp"
 
+// External: set by the language menu, persisted in settings.
+// Empty = auto-detect from system. "en" = English, "zh-CN" = Simplified Chinese.
+extern std::wstring g_language;
+
+// ── Built-in Chinese translation table ──────────────────────────
+// Hash-based lookup map populated at startup when language is zh-CN.
+// No external .po/.ymo files needed — everything is compiled in.
 std::unordered_map<uint32_t, const wchar_t*> hashToStrMap;
+
+void BuildChineseMap()
+{
+	// English source → FNV-1a hash → Chinese translation
+	// Hash is computed over the UTF-16LE bytes of the English source string,
+	// matching what the _() macro passes to Translate().
+
+	#define H(s) fnv1a_32((s), wcslen(s) * sizeof(wchar_t))
+
+	hashToStrMap.emplace(H(L"Unsupported Operating System"), L"操作系统不支持");
+	hashToStrMap.emplace(H(L"AudioPlaybackConnector is not supported on this operating system version."), L"此操作系统版本不支持 AudioPlaybackConnector。");
+	hashToStrMap.emplace(H(L"All connections will be closed.\nExit anyway?"), L"所有连接将被关闭。\n确定退出吗？");
+	hashToStrMap.emplace(H(L"Reconnect on next start"), L"下次启动时重新连接");
+	hashToStrMap.emplace(H(L"Exit"), L"退出");
+	hashToStrMap.emplace(H(L"Language"), L"语言");
+	hashToStrMap.emplace(H(L"Bluetooth Settings"), L"蓝牙设置");
+	hashToStrMap.emplace(H(L"Disconnect All"), L"断开全部");
+	hashToStrMap.emplace(H(L"Restart Bluetooth Audio"), L"重启蓝牙音频");
+	hashToStrMap.emplace(H(L"Connecting"), L"正在连接");
+	hashToStrMap.emplace(H(L"The request timed out"), L"请求超时");
+	hashToStrMap.emplace(H(L"The operation was denied by the system"), L"操作被系统拒绝");
+	hashToStrMap.emplace(H(L"Unknown error"), L"未知错误");
+	hashToStrMap.emplace(H(L"Connected"), L"已连接");
+	hashToStrMap.emplace(H(L"All Devices Disconnected"), L"所有设备已断开");
+	hashToStrMap.emplace(H(L"All Bluetooth audio connections have been closed.\n\nYou can now reconnect your devices."), L"所有蓝牙音频连接已关闭。\n\n现在可以重新连接设备。");
+	hashToStrMap.emplace(H(L"This will disconnect and reconnect the audio connections managed by AudioPlaybackConnector.\n\n"
+	                      L"No system services are touched — only this app's own connections are affected.\n"
+	                      L"Other Bluetooth devices (mouse, keyboard, etc.) will NOT be interrupted.\n\n"
+	                      L"Do you want to continue?"),
+	                      L"这将断开并重新连接由 AudioPlaybackConnector 管理的音频连接。\n\n"
+	                      L"不会触及其他系统服务 — 仅影响本程序自身的连接。\n"
+	                      L"其他蓝牙设备（鼠标、键盘等）不会中断。\n\n"
+	                      L"是否继续？");
+	hashToStrMap.emplace(H(L"Language Changed"), L"语言已更改");
+	hashToStrMap.emplace(H(L"Language has been set to English. Please restart AudioPlaybackConnector for the change to take effect."), L"语言已设置为英文。请重启 AudioPlaybackConnector 以生效。");
+	hashToStrMap.emplace(H(L"Language has been set to Chinese. Please restart AudioPlaybackConnector for the change to take effect."), L"语言已设置为中文。请重启 AudioPlaybackConnector 以生效。");
+
+	#undef H
+}
 
 #pragma pack(push, 1)
 struct YMOData
@@ -15,10 +61,6 @@ struct YMOData
 };
 #pragma pack(pop)
 
-// External: set by the language menu, persisted in settings.
-// Empty = auto-detect from system. "en" = English, "zh-CN" = Simplified Chinese.
-extern std::wstring g_language;
-
 LANGID LanguageToLangId(const std::wstring& lang)
 {
 	if (lang == L"zh-CN")  return MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED);
@@ -26,22 +68,30 @@ LANGID LanguageToLangId(const std::wstring& lang)
 	return MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US);
 }
 
-void ClearTranslations()
-{
-	hashToStrMap.clear();
-}
-
 void LoadTranslateData()
 {
-	// Clear previous translations if reloading
 	hashToStrMap.clear();
 
-	LANGID langId;
-	if (!g_language.empty())
-		langId = LanguageToLangId(g_language);
-	else
-		langId = GetThreadUILanguage();
+	// Determine language
+	std::wstring lang = g_language;
+	if (lang.empty())
+	{
+		// Auto-detect: check if system UI language is Chinese
+		LANGID sysLang = GetThreadUILanguage();
+		LANGID primary = PRIMARYLANGID(sysLang);
+		if (primary == LANG_CHINESE)
+			lang = L"zh-CN";
+	}
 
+	// Built-in Chinese map — no external files, no encoding issues
+	if (lang == L"zh-CN")
+	{
+		BuildChineseMap();
+		return;
+	}
+
+	// For other languages, try external .ymo resource (kept for future expansion)
+	LANGID langId = LanguageToLangId(lang);
 	auto hRes = FindResourceExW(g_hInst, L"YMO", MAKEINTRESOURCEW(1), langId);
 	if (hRes)
 	{
@@ -52,7 +102,6 @@ void LoadTranslateData()
 			if (ymo)
 			{
 				hashToStrMap.reserve(ymo->len);
-
 				for (int i = 0; i < ymo->len; ++i)
 				{
 					auto hash = ymo->table[i].hash;

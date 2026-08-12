@@ -22,20 +22,6 @@ jobs:
     - name: Add msbuild to PATH
       uses: microsoft/setup-msbuild@v2
 
-    - name: Setup Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.12'
-
-    - name: Generate translation resources
-      run: |
-        cd translate
-        pip install -r requirements.txt
-        chmod +x gen_rc.sh po2ymo.py
-        mkdir -p generated
-        ./gen_rc.sh
-      shell: bash
-
     - name: Restore NuGet packages
       run: |
         Invoke-WebRequest -Uri https://dist.nuget.org/win-x86-commandline/latest/nuget.exe -OutFile nuget.exe
