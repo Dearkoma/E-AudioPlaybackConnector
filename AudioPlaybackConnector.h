@@ -1,6 +1,7 @@
 #pragma once
 
 #include "resource.h"
+#include <mutex>
 
 using namespace winrt::Windows::Data::Json;
 using namespace winrt::Windows::Devices::Enumeration;
@@ -13,6 +14,7 @@ namespace fs = std::filesystem;
 
 constexpr UINT WM_NOTIFYICON = WM_APP + 1;
 constexpr UINT WM_CONNECTDEVICE = WM_APP + 2;
+constexpr UINT WM_CONNECTION_CLOSED = WM_APP + 3; // StateChanged → UI thread marshal
 
 HINSTANCE g_hInst;
 HWND g_hWnd;
@@ -23,6 +25,7 @@ MenuFlyout g_xamlMenu = nullptr;
 FocusState g_menuFocusState = FocusState::Unfocused;
 DevicePicker g_devicePicker = nullptr;
 std::unordered_map<std::wstring, std::pair<DeviceInformation, AudioPlaybackConnection>> g_audioPlaybackConnections;
+std::mutex g_connectionsMutex; // Protects g_audioPlaybackConnections
 HICON g_hIconLight = nullptr;
 HICON g_hIconDark = nullptr;
 NOTIFYICONDATAW g_nid = {

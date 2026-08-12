@@ -113,15 +113,18 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		SaveSettings();
 
 		// Close all audio connections and release endpoints.
-		// Each Close() triggers async cleanup; the StateChanged
-		// callback may fire later, but since we clear the map
-		// after closing, it will find nothing and be harmless.
-		for (auto& pair : g_audioPlaybackConnections)
+		// Each Close() triggers async cleanup via StateChanged →
+		// WM_CONNECTION_CLOSED, but since we clear the map after
+		// closing, those messages will find nothing and be harmless.
 		{
-			pair.second.second.Close();
-			g_devicePicker.SetDisplayStatus(pair.second.first, {}, DevicePickerDisplayStatusOptions::None);
+			std::lock_guard<std::mutex> lock(g_connectionsMutex);
+			for (auto& pair : g_audioPlaybackConnections)
+			{
+				pair.second.second.Close();
+				g_devicePicker.SetDisplayStatus(pair.second.first, {}, DevicePickerDisplayStatusOptions::None);
+			}
+			g_audioPlaybackConnections.clear();
 		}
-		g_audioPlaybackConnections.clear();
 
 		// Remove tray icon
 		Shell_NotifyIconW(NIM_DELETE, &g_nid);
@@ -203,6 +206,21 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			g_lastDevices.clear();
 		}
 		break;
+	case WM_CONNECTION_CLOSED:
+	{
+		// StateChanged callback runs on an audio/Bluetooth background thread.
+		// It posts this message so all XAML UI updates and map mutations happen
+		// on the main UI thread, avoiding cross-thread races.
+		std::unique_ptr<std::wstring> deviceId(reinterpret_cast<std::wstring*>(wParam));
+		std::lock_guard<std::mutex> lock(g_connectionsMutex);
+		auto it = g_audioPlaybackConnections.find(*deviceId);
+		if (it != g_audioPlaybackConnections.end())
+		{
+			g_devicePicker.SetDisplayStatus(it->second.first, {}, DevicePickerDisplayStatusOptions::None);
+			g_audioPlaybackConnections.erase(it);
+		}
+		break;
+	}
 	default:
 		if (WM_TASKBAR_CREATED && message == WM_TASKBAR_CREATED)
 		{
@@ -263,7 +281,12 @@ void SetupMenu()
 	exitItem.Text(_(L"Exit"));
 	exitItem.Icon(closeIcon);
 	exitItem.Click([](const auto&, const auto&) {
-		if (g_audioPlaybackConnections.size() == 0)
+		bool hasConnections;
+		{
+			std::lock_guard<std::mutex> lock(g_connectionsMutex);
+			hasConnections = !g_audioPlaybackConnections.empty();
+		}
+		if (!hasConnections)
 		{
 			PostMessageW(g_hWnd, WM_CLOSE, 0, 0);
 			return;
@@ -354,20 +377,20 @@ winrt::fire_and_forget ConnectDevice(DevicePicker picker, DeviceInformation devi
 		auto connection = AudioPlaybackConnection::TryCreateFromId(device.Id());
 		if (connection)
 		{
-			g_audioPlaybackConnections.emplace(device.Id(), std::pair(device, connection));
+			{
+				std::lock_guard<std::mutex> lock(g_connectionsMutex);
+				g_audioPlaybackConnections.emplace(device.Id(), std::pair(device, connection));
+			}
 
 			connection.StateChanged([](const auto& sender, const auto&) {
 				if (sender.State() == AudioPlaybackConnectionState::Closed)
 				{
-					auto it = g_audioPlaybackConnections.find(std::wstring(sender.DeviceId()));
-					if (it != g_audioPlaybackConnections.end())
-					{
-						g_devicePicker.SetDisplayStatus(it->second.first, {}, DevicePickerDisplayStatusOptions::None);
-						g_audioPlaybackConnections.erase(it);
-					}
-					// Do NOT call sender.Close() here — the connection is already Closed,
-					// and calling Close() again can corrupt the internal state machine,
-					// potentially leaving zombie audio endpoints that require a reboot.
+					// StateChanged fires on a background Bluetooth/audio thread.
+					// PostMessage marshals the work to the UI thread so we don't
+					// touch XAML objects (g_devicePicker) or the global connection
+					// map from the wrong thread.
+					auto deviceId = new std::wstring(sender.DeviceId());
+					PostMessageW(g_hWnd, WM_CONNECTION_CLOSED, reinterpret_cast<WPARAM>(deviceId), 0);
 				}
 			});
 
@@ -425,16 +448,17 @@ winrt::fire_and_forget ConnectDevice(DevicePicker picker, DeviceInformation devi
 	}
 	else
 	{
-		auto it = g_audioPlaybackConnections.find(std::wstring(device.Id()));
-		if (it != g_audioPlaybackConnections.end())
 		{
-			// Close the connection and wait briefly for the async audio
-			// endpoint cleanup to complete before removing from the map.
-			// Without this delay, a partially-initialized endpoint can
-			// become a zombie that blocks future connections.
-			it->second.second.Close();
-			Sleep(200);
-			g_audioPlaybackConnections.erase(it);
+			std::lock_guard<std::mutex> lock(g_connectionsMutex);
+			auto it = g_audioPlaybackConnections.find(std::wstring(device.Id()));
+			if (it != g_audioPlaybackConnections.end())
+			{
+				// Close the connection; the StateChanged → WM_CONNECTION_CLOSED
+				// path handles the async endpoint cleanup and UI update on the
+				// correct thread — no Sleep() needed here.
+				it->second.second.Close();
+				g_audioPlaybackConnections.erase(it);
+			}
 		}
 		picker.SetDisplayStatus(device, errorMessage, DevicePickerDisplayStatusOptions::ShowRetryButton);
 	}
@@ -462,12 +486,16 @@ void SetupDevicePicker()
 	});
 	g_devicePicker.DisconnectButtonClicked([](const auto& sender, const auto& args) {
 		auto device = args.Device();
-		auto it = g_audioPlaybackConnections.find(std::wstring(device.Id()));
-		if (it != g_audioPlaybackConnections.end())
 		{
-			it->second.second.Close();
-			Sleep(200); // Allow async audio endpoint cleanup to complete
-			g_audioPlaybackConnections.erase(it);
+			std::lock_guard<std::mutex> lock(g_connectionsMutex);
+			auto it = g_audioPlaybackConnections.find(std::wstring(device.Id()));
+			if (it != g_audioPlaybackConnections.end())
+			{
+				it->second.second.Close();
+				g_audioPlaybackConnections.erase(it);
+				// StateChanged → WM_CONNECTION_CLOSED handles async
+				// endpoint cleanup on the UI thread; no Sleep() needed.
+			}
 		}
 		sender.SetDisplayStatus(device, {}, DevicePickerDisplayStatusOptions::None);
 	});
@@ -515,22 +543,25 @@ void UpdateNotifyIcon()
 
 void DisconnectAllDevices()
 {
-	if (g_audioPlaybackConnections.empty())
 	{
-		return;
+		std::lock_guard<std::mutex> lock(g_connectionsMutex);
+		if (g_audioPlaybackConnections.empty())
+		{
+			return;
+		}
+
+		// Close all active connections. StateChanged → WM_CONNECTION_CLOSED
+		// handles async endpoint cleanup on the UI thread. We clear the map
+		// immediately — pending WM_CONNECTION_CLOSED messages will find
+		// nothing, which is harmless.
+		for (auto& pair : g_audioPlaybackConnections)
+		{
+			pair.second.second.Close();
+			g_devicePicker.SetDisplayStatus(pair.second.first, {}, DevicePickerDisplayStatusOptions::None);
+		}
+
+		g_audioPlaybackConnections.clear();
 	}
-
-	// Close all active connections
-	for (auto& pair : g_audioPlaybackConnections)
-	{
-		pair.second.second.Close();
-		g_devicePicker.SetDisplayStatus(pair.second.first, {}, DevicePickerDisplayStatusOptions::None);
-	}
-
-	// Brief wait for async cleanup to propagate before clearing the map
-	Sleep(300);
-
-	g_audioPlaybackConnections.clear();
 
 	TaskDialog(nullptr, nullptr,
 		_(L"All Devices Disconnected"),
@@ -541,9 +572,12 @@ void DisconnectAllDevices()
 
 winrt::fire_and_forget RestoreAudioService()
 {
-	if (g_audioPlaybackConnections.empty())
 	{
-		co_return;
+		std::lock_guard<std::mutex> lock(g_connectionsMutex);
+		if (g_audioPlaybackConnections.empty())
+		{
+			co_return;
+		}
 	}
 
 	int result = TaskDialog(nullptr, nullptr,
@@ -562,15 +596,17 @@ winrt::fire_and_forget RestoreAudioService()
 
 	// Save device IDs before closing so we can reconnect
 	std::vector<std::wstring> deviceIds;
-	deviceIds.reserve(g_audioPlaybackConnections.size());
-	for (const auto& pair : g_audioPlaybackConnections)
 	{
-		deviceIds.push_back(pair.first);
-		pair.second.second.Close();
-		g_devicePicker.SetDisplayStatus(pair.second.first, {}, DevicePickerDisplayStatusOptions::None);
+		std::lock_guard<std::mutex> lock(g_connectionsMutex);
+		deviceIds.reserve(g_audioPlaybackConnections.size());
+		for (const auto& pair : g_audioPlaybackConnections)
+		{
+			deviceIds.push_back(pair.first);
+			pair.second.second.Close();
+			g_devicePicker.SetDisplayStatus(pair.second.first, {}, DevicePickerDisplayStatusOptions::None);
+		}
+		g_audioPlaybackConnections.clear();
 	}
-
-	g_audioPlaybackConnections.clear();
 
 	// Wait for async audio endpoint cleanup to complete before reconnecting.
 	// Without this, the old endpoint may still be releasing resources when
@@ -580,9 +616,12 @@ winrt::fire_and_forget RestoreAudioService()
 	// If the user exited during the wait, don't reconnect
 	if (g_shuttingDown) co_return;
 
-	// Reconnect each device that was previously connected
+	// Reconnect each device with staggered delays to avoid flooding the
+	// Bluetooth stack with simultaneous connection requests, which degrades
+	// both Bluetooth quality and 2.4 GHz Wi-Fi coexistence.
 	for (const auto& id : deviceIds)
 	{
 		ConnectDevice(g_devicePicker, id);
+		co_await winrt::resume_after(std::chrono::milliseconds(500));
 	}
 }
