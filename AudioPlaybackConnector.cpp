@@ -629,7 +629,10 @@ void SetupDevicePicker()
 
 	g_devicePicker.Filter().SupportedDeviceSelectors().Append(AudioPlaybackConnection::GetDeviceSelector());
 	g_devicePicker.DevicePickerDismissed([](const auto&, const auto&) {
-		SetWindowPos(g_hWnd, nullptr, 0, 0, 0, 0, SWP_NOZORDER | SWP_HIDEWINDOW);
+		// Undo the full-screen size + topmost state used to show the picker:
+		// restore the tiny hidden window so a full-screen layered window is
+		// never left behind (it can interfere with DWM/game composition).
+		SetWindowPos(g_hWnd, HWND_NOTOPMOST, 0, 0, 1, 1, SWP_NOZORDER | SWP_HIDEWINDOW);
 	});
 	g_devicePicker.DeviceSelected([](const auto& sender, const auto& args) {
 		ConnectDevice(sender, args.SelectedDevice());
