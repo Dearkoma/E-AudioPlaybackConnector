@@ -2,7 +2,7 @@
 
 **Windows 10 2004+ 蓝牙音频接收 (A2DP Sink) 连接工具**
 
-[English](https://github.com/Dearkoma/E-AudioPlaybackConnector/blob/master/README.md) | **简体中文**
+[English](https://github.com/Dearkoma/AudioPlaybackConnector/blob/master/README.md) | **简体中文**
 
 ---
 
@@ -24,7 +24,7 @@ AudioPlaybackConnector 是一个单线程 C++/WinRT 桌面应用，为 Windows 1
 
 ### 预览
 
-![预览](https://cdn.jsdelivr.net/gh/Dearkoma/E-AudioPlaybackConnector@master/AudioPlaybackConnector.gif)
+![预览](https://cdn.jsdelivr.net/gh/Dearkoma/AudioPlaybackConnector@master/AudioPlaybackConnector.gif)
 
 ### 构建系统
 

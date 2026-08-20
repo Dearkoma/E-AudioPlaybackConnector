@@ -2,7 +2,7 @@
 
 **Bluetooth A2DP Sink connector for Windows 10 2004+**
 
-**English** | [简体中文](https://github.com/Dearkoma/E-AudioPlaybackConnector/blob/master/README.zh_CN.md)
+**English** | [简体中文](https://github.com/Dearkoma/AudioPlaybackConnector/blob/master/README.zh_CN.md)
 
 ---
 
@@ -24,7 +24,7 @@ AudioPlaybackConnector is a single-threaded C++/WinRT desktop application that e
 
 ### Preview
 
-![Preview](https://cdn.jsdelivr.net/gh/Dearkoma/E-AudioPlaybackConnector@master/AudioPlaybackConnector.gif)
+![Preview](https://cdn.jsdelivr.net/gh/Dearkoma/AudioPlaybackConnector@master/AudioPlaybackConnector.gif)
 
 ### Build System
 
