@@ -96,7 +96,7 @@ enum : UINT
 // SetDisplayStatus may be called by a ConnectDevice coroutine after the picker
 // was dismissed and its island torn down (g_devicePicker can be null); swallow
 // any failure so a stale status update can never crash the app.
-void SafeSetDisplayStatus(DevicePicker const& picker, DeviceInformation const& device, winrt::hstring const& status, DevicePickerDisplayStatusOptions options)
+void SafeSetDisplayStatus(DevicePicker const& picker, DeviceInformation const& device, winrt::param::hstring const& status, DevicePickerDisplayStatusOptions options)
 {
 	try { if (picker) picker.SetDisplayStatus(device, status, options); } catch (...) {}
 }
@@ -401,7 +401,8 @@ void ShowDevicePicker(Rect rect)
 			SafeSetDisplayStatus(sender, device, {}, DevicePickerDisplayStatusOptions::None);
 		});
 
-		g_devicePicker.Show(rect, winrt::Windows::UI::Xaml::Controls::Primitives::Placement::Above);
+		using namespace winrt::Windows::UI::Popups;
+		g_devicePicker.Show(rect, Placement::Above);
 	}
 	catch (winrt::hresult_error const&)
 	{
@@ -434,8 +435,9 @@ void ShowExitConfirmation()
 	config.pszMainInstruction = _(L"All connections will be closed.\nExit anyway?");
 	config.pszVerificationText = _(L"Reconnect on next start");
 
+	// The verification checkbox state is an in/out parameter of
+	// TaskDialogIndirect; pre-setting it to TRUE checks it by default.
 	BOOL verifyChecked = g_reconnect ? TRUE : FALSE;
-	config.pfVerificationFlagChecked = &verifyChecked;
 
 	int buttonPressed = 0;
 	if (SUCCEEDED(TaskDialogIndirect(&config, &buttonPressed, nullptr, &verifyChecked)) && buttonPressed == IDOK)
