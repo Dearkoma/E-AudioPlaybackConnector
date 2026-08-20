@@ -33,18 +33,27 @@ void LoadSettings()
 
 		std::wstring utf16 = Utf8ToUtf16(string);
 		auto jsonObj = JsonObject::Parse(utf16);
-		g_reconnect = jsonObj.Lookup(L"reconnect").GetBoolean();
+
+		// Tolerate older/missing keys instead of throwing and losing whatever
+		// was already parsed.
+		auto reconnect = jsonObj.TryLookup(L"reconnect");
+		if (reconnect && reconnect.ValueType() == JsonValueType::Boolean)
+			g_reconnect = reconnect.GetBoolean();
 
 		auto language = jsonObj.TryLookup(L"language");
 		if (language && language.ValueType() == JsonValueType::String)
 			g_language = std::wstring(language.GetString());
 
-		auto lastDevices = jsonObj.Lookup(L"lastDevices").GetArray();
-		g_lastDevices.reserve(lastDevices.Size());
-		for (const auto& i : lastDevices)
+		auto lastDevices = jsonObj.TryLookup(L"lastDevices");
+		if (lastDevices && lastDevices.ValueType() == JsonValueType::Array)
 		{
-			if (i.ValueType() == JsonValueType::String)
-				g_lastDevices.push_back(std::wstring(i.GetString()));
+			auto devices = lastDevices.GetArray();
+			g_lastDevices.reserve(devices.Size());
+			for (const auto& i : devices)
+			{
+				if (i.ValueType() == JsonValueType::String)
+					g_lastDevices.push_back(std::wstring(i.GetString()));
+			}
 		}
 	}
 	CATCH_LOG();

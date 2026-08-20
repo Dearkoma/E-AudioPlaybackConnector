@@ -37,7 +37,7 @@ void DrawSvgTohDC(std::string_view svg, HDC hdc, LONG width, LONG height, const 
 
 	dc->BeginDraw();
 	dc->DrawSvgDocument(svgDoc.get());
-	dc->EndDraw();
+	winrt::check_hresult(dc->EndDraw());
 }
 
 auto CreateDIB(HDC hdc, LONG width, LONG height, WORD bitCount)

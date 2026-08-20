@@ -1,6 +1,17 @@
 #include "pch.h"
 #include "AudioPlaybackConnector.h"
 
+// Posted with WM_CONNECTION_CLOSED: the device id of the connection that
+// closed, plus the AudioPlaybackConnection instance that actually closed.
+// WM_CONNECTION_CLOSED compares this against the current map entry so a stale
+// message from a previous connection to the same device can never remove a
+// newer, still-open connection.
+struct ConnectionClosedInfo
+{
+	std::wstring deviceId;
+	winrt::Windows::Media::Audio::AudioPlaybackConnection connection;
+};
+
 LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
 void SetupFlyout();
 void SetupMenu();
@@ -10,6 +21,7 @@ void SetupSvgIcon();
 void UpdateNotifyIcon();
 void DisconnectAllDevices();
 winrt::fire_and_forget RestoreAudioService();
+winrt::fire_and_forget ReconnectDevices(std::vector<std::wstring> deviceIds);
 void RebuildUi();
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
@@ -201,11 +213,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	case WM_CONNECTDEVICE:
 		if (g_reconnect)
 		{
-			for (const auto& i : g_lastDevices)
-			{
-				ConnectDevice(g_devicePicker, i);
-			}
-			g_lastDevices.clear();
+			// Stagger reconnects so simultaneous requests don't flood the
+			// Bluetooth stack (same reasoning as RestoreAudioService).
+			ReconnectDevices(std::move(g_lastDevices));
 		}
 		break;
 	case WM_CONNECTION_CLOSED:
@@ -213,10 +223,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		// StateChanged callback runs on an audio/Bluetooth background thread.
 		// It posts this message so all XAML UI updates and map mutations happen
 		// on the main UI thread, avoiding cross-thread races.
-		std::unique_ptr<std::wstring> deviceId(reinterpret_cast<std::wstring*>(wParam));
+		std::unique_ptr<ConnectionClosedInfo> info(reinterpret_cast<ConnectionClosedInfo*>(wParam));
 		std::lock_guard<std::mutex> lock(g_connectionsMutex);
-		auto it = g_audioPlaybackConnections.find(*deviceId);
-		if (it != g_audioPlaybackConnections.end())
+		auto it = g_audioPlaybackConnections.find(info->deviceId);
+		// Only remove the entry if the connection that closed is still the one
+		// in the map. A stale message from an earlier connection to the same
+		// device must not drop a newer, still-open connection.
+		if (it != g_audioPlaybackConnections.end() && it->second.second == info->connection)
 		{
 			g_devicePicker.SetDisplayStatus(it->second.first, {}, DevicePickerDisplayStatusOptions::None);
 			g_audioPlaybackConnections.erase(it);
@@ -429,14 +442,17 @@ winrt::fire_and_forget ConnectDevice(DevicePicker picker, DeviceInformation devi
 					// StateChanged fires on a background Bluetooth/audio thread.
 					// PostMessage marshals the work to the UI thread so we don't
 					// touch XAML objects (g_devicePicker) or the global connection
-					// map from the wrong thread.
-					auto deviceId = new std::wstring(sender.DeviceId());
-					PostMessageW(g_hWnd, WM_CONNECTION_CLOSED, reinterpret_cast<WPARAM>(deviceId), 0);
+					// map from the wrong thread. The connection identity is
+					// included so WM_CONNECTION_CLOSED can detect stale messages.
+					auto info = new ConnectionClosedInfo{ std::wstring(sender.DeviceId()), sender };
+					PostMessageW(g_hWnd, WM_CONNECTION_CLOSED, reinterpret_cast<WPARAM>(info), 0);
 				}
 			});
 
 			co_await connection.StartAsync();
+			if (g_shuttingDown) co_return;
 			auto result = co_await connection.OpenAsync();
+			if (g_shuttingDown) co_return;
 
 			switch (result.Status())
 			{
@@ -510,6 +526,7 @@ winrt::fire_and_forget ConnectDevice(DevicePicker picker, std::wstring_view devi
 	if (g_shuttingDown) co_return;
 
 	auto device = co_await DeviceInformation::CreateFromIdAsync(deviceId);
+	if (g_shuttingDown) co_return;
 	ConnectDevice(picker, device);
 }
 
@@ -662,6 +679,18 @@ winrt::fire_and_forget RestoreAudioService()
 	// both Bluetooth quality and 2.4 GHz Wi-Fi coexistence.
 	for (const auto& id : deviceIds)
 	{
+		ConnectDevice(g_devicePicker, id);
+		co_await winrt::resume_after(std::chrono::milliseconds(500));
+	}
+}
+
+winrt::fire_and_forget ReconnectDevices(std::vector<std::wstring> deviceIds)
+{
+	// Startup auto-reconnect: stagger each device so simultaneous requests
+	// don't flood the Bluetooth stack (same reasoning as RestoreAudioService).
+	for (const auto& id : deviceIds)
+	{
+		if (g_shuttingDown) co_return;
 		ConnectDevice(g_devicePicker, id);
 		co_await winrt::resume_after(std::chrono::milliseconds(500));
 	}
