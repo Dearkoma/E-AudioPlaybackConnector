@@ -103,6 +103,7 @@ void SafeSetDisplayStatus(DevicePicker const& picker, DeviceInformation const& d
 
 LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
 winrt::fire_and_forget ConnectDevice(DevicePicker, std::wstring_view);
+winrt::fire_and_forget ConnectDevice(DevicePicker, DeviceInformation);
 void SetupSvgIcon();
 void UpdateNotifyIcon();
 void DisconnectAllDevices();
