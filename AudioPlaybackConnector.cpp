@@ -70,6 +70,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 	desktopSource.Content(g_xamlCanvas);
 
 	LoadSettings();
+	ReloadTranslations();
 	SetupFlyout();
 	SetupMenu();
 	SetupDevicePicker();
@@ -324,7 +325,6 @@ void SetupMenu()
 	MenuFlyoutItem langEnItem;
 	langEnItem.Text(L"English");
 	langEnItem.Click([](const auto&, const auto&) {
-		if (g_language == L"en") return;
 		g_language = L"en";
 		SaveSettings();
 		RebuildUi();
@@ -333,7 +333,6 @@ void SetupMenu()
 	MenuFlyoutItem langZhItem;
 	langZhItem.Text(L"中文");
 	langZhItem.Click([](const auto&, const auto&) {
-		if (g_language == L"zh-CN") return;
 		g_language = L"zh-CN";
 		SaveSettings();
 		RebuildUi();
