@@ -27,6 +27,7 @@ void BuildChineseMap()
 	hashToStrMap.emplace(H(L"Bluetooth Settings"), L"蓝牙设置");
 	hashToStrMap.emplace(H(L"Disconnect All"), L"断开全部");
 	hashToStrMap.emplace(H(L"Restart Bluetooth Audio"), L"重启蓝牙音频");
+	hashToStrMap.emplace(H(L"View Logs"), L"查看日志");
 	hashToStrMap.emplace(H(L"Connecting"), L"正在连接");
 	hashToStrMap.emplace(H(L"The request timed out"), L"请求超时");
 	hashToStrMap.emplace(H(L"The operation was denied by the system"), L"操作被系统拒绝");

@@ -1,6 +1,9 @@
 #include "pch.h"
 #include "AudioPlaybackConnector.h"
 
+#include <stdarg.h>
+#include <strsafe.h>
+
 // Posted with WM_CONNECTION_CLOSED: the device id of the connection that
 // closed, plus the AudioPlaybackConnection instance that actually closed.
 // WM_CONNECTION_CLOSED compares this against the current map entry so a stale
@@ -11,6 +14,85 @@ struct ConnectionClosedInfo
 	std::wstring deviceId;
 	winrt::Windows::Media::Audio::AudioPlaybackConnection connection;
 };
+
+// ── Logging ──────────────────────────────────────────────────────────
+// Log file: %LOCALAPPDATA%\AudioPlaybackConnector\AudioPlaybackConnector.log (UTF-8).
+// Business events (connect/disconnect/etc.) go through LogEvent(); WIL's
+// LOG_*/THROW_* failures are routed here via wil::SetResultLoggingCallback.
+
+std::wstring GetLogDirectory()
+{
+	wchar_t buf[MAX_PATH];
+	const DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", buf, static_cast<DWORD>(ARRAYSIZE(buf)));
+	if (n == 0 || n >= ARRAYSIZE(buf))
+	{
+		// Fallback: exe directory (only when LOCALAPPDATA is unavailable).
+		return GetModuleFsPath(g_hInst).remove_filename().wstring();
+	}
+	return std::wstring(buf) + L"\\AudioPlaybackConnector";
+}
+
+std::wstring GetLogFilePath()
+{
+	return GetLogDirectory() + L"\\AudioPlaybackConnector.log";
+}
+
+// Append one line to the log file. Thread-safe; never throws.
+void WriteLogLine(const wchar_t* text)
+{
+	try
+	{
+		static std::mutex s_logMutex;
+		std::lock_guard<std::mutex> lock(s_logMutex);
+
+		std::filesystem::create_directories(GetLogDirectory());
+
+		std::wstring wtext(text);
+		std::string utf8 = Utf16ToUtf8(wtext);
+		utf8.push_back('\n');
+
+		// FILE_APPEND_DATA makes WriteFile always write at end of file.
+		wil::unique_hfile hFile(CreateFileW(GetLogFilePath().c_str(), FILE_APPEND_DATA, FILE_SHARE_READ, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
+		THROW_LAST_ERROR_IF(!hFile);
+
+		DWORD written = 0;
+		THROW_IF_WIN32_BOOL_FALSE(WriteFile(hFile.get(), utf8.data(), static_cast<DWORD>(utf8.size()), &written, nullptr));
+	}
+	catch (...)
+	{
+		// Logging must never take the app down.
+	}
+}
+
+// WIL failure callback: every LOG_*/THROW_* event lands here (possibly on a
+// background thread). FailureInfo is copied onto the stack before the call.
+// __stdcall matches WIL's callback typedef (needed for the x86 build).
+void __stdcall WriteWilDiagnosticsToFile(wil::FailureInfo const& failure) noexcept
+{
+	wchar_t message[2048];
+	if (FAILED(wil::GetFailureLogString(message, ARRAYSIZE(message), failure)))
+	{
+		StringCchPrintfW(message, ARRAYSIZE(message), L"HRESULT 0x%08X", failure.hr);
+	}
+	WriteLogLine(message);
+}
+
+// Timestamped business-event log entry (wide printf-style format).
+void LogEvent(PCWSTR fmt, ...)
+{
+	wchar_t message[2048];
+	va_list args;
+	va_start(args, fmt);
+	StringCchVPrintfW(message, ARRAYSIZE(message), fmt, args);
+	va_end(args);
+
+	SYSTEMTIME st;
+	GetLocalTime(&st);
+	wchar_t line[2304];
+	StringCchPrintfW(line, ARRAYSIZE(line), L"[%04u-%02u-%02u %02u:%02u:%02u] %s",
+		st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond, message);
+	WriteLogLine(line);
+}
 
 LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
 void SetupFlyout();
@@ -34,6 +116,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 	UNREFERENCED_PARAMETER(nCmdShow);
 
 	g_hInst = hInstance;
+
+	wil::SetResultLoggingCallback(WriteWilDiagnosticsToFile);
+	LogEvent(L"Application started");
 
 	winrt::init_apartment();
 
@@ -122,6 +207,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		// coroutines (ConnectDevice, RestoreAudioService) from
 		// touching resources we are about to release.
 		g_shuttingDown = true;
+		LogEvent(L"Application exiting");
 
 		// Save settings while we still have the connection list intact
 		SaveSettings();
@@ -232,6 +318,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		if (it != g_audioPlaybackConnections.end() && it->second.second == info->connection)
 		{
 			g_devicePicker.SetDisplayStatus(it->second.first, {}, DevicePickerDisplayStatusOptions::None);
+			LogEvent(L"Disconnected: %s", it->second.first.Name().c_str());
 			g_audioPlaybackConnections.erase(it);
 		}
 		break;
@@ -355,6 +442,21 @@ void SetupMenu()
 	langSubItem.Items().Append(langZhItem);
 	menu.Items().Append(langSubItem);
 
+	// --- View Logs ---
+	FontIcon logIcon;
+	logIcon.Glyph(L"\xE8A5"); // List
+
+	MenuFlyoutItem logItem;
+	logItem.Text(_(L"View Logs"));
+	logItem.Icon(logIcon);
+	logItem.Click([](const auto&, const auto&) {
+		std::filesystem::create_directories(GetLogDirectory());
+		auto result = ShellExecuteW(nullptr, L"open", GetLogFilePath().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+		LOG_LAST_ERROR_IF(reinterpret_cast<INT_PTR>(result) <= 32);
+	});
+
+	menu.Items().Append(logItem);
+
 	// --- Disconnect All ---
 	MenuFlyoutSeparator separator1;
 
@@ -420,6 +522,8 @@ void RebuildUi()
 winrt::fire_and_forget ConnectDevice(DevicePicker picker, DeviceInformation device)
 {
 	if (g_shuttingDown) co_return;
+
+	LogEvent(L"Connecting: %s", device.Name().c_str());
 
 	picker.SetDisplayStatus(device, _(L"Connecting"), DevicePickerDisplayStatusOptions::ShowProgress | DevicePickerDisplayStatusOptions::ShowDisconnectButton);
 
@@ -502,6 +606,7 @@ winrt::fire_and_forget ConnectDevice(DevicePicker picker, DeviceInformation devi
 	if (success)
 	{
 		picker.SetDisplayStatus(device, _(L"Connected"), DevicePickerDisplayStatusOptions::ShowDisconnectButton);
+		LogEvent(L"Connected: %s", device.Name().c_str());
 	}
 	else
 	{
@@ -517,6 +622,7 @@ winrt::fire_and_forget ConnectDevice(DevicePicker picker, DeviceInformation devi
 				g_audioPlaybackConnections.erase(it);
 			}
 		}
+		LogEvent(L"Connect failed: %s  (%s)", device.Name().c_str(), errorMessage.c_str());
 		picker.SetDisplayStatus(device, errorMessage, DevicePickerDisplayStatusOptions::ShowRetryButton);
 	}
 }
@@ -621,6 +727,8 @@ void DisconnectAllDevices()
 		g_audioPlaybackConnections.clear();
 	}
 
+	LogEvent(L"Disconnect All: closed all connections");
+
 	TaskDialog(nullptr, nullptr,
 		_(L"All Devices Disconnected"),
 		nullptr,
@@ -666,6 +774,8 @@ winrt::fire_and_forget RestoreAudioService()
 		g_audioPlaybackConnections.clear();
 	}
 
+	LogEvent(L"Restart Bluetooth Audio: closed %zu connection(s), reconnecting", deviceIds.size());
+
 	// Wait for async audio endpoint cleanup to complete before reconnecting.
 	// Without this, the old endpoint may still be releasing resources when
 	// we try to open a new one for the same device.
@@ -686,6 +796,8 @@ winrt::fire_and_forget RestoreAudioService()
 
 winrt::fire_and_forget ReconnectDevices(std::vector<std::wstring> deviceIds)
 {
+	LogEvent(L"Reconnecting %zu device(s)", deviceIds.size());
+
 	// Startup auto-reconnect: stagger each device so simultaneous requests
 	// don't flood the Bluetooth stack (same reasoning as RestoreAudioService).
 	for (const auto& id : deviceIds)
