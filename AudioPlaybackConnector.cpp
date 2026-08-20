@@ -16,25 +16,14 @@ struct ConnectionClosedInfo
 };
 
 // ── Logging ──────────────────────────────────────────────────────────
-// Log file: %LOCALAPPDATA%\AudioPlaybackConnector\AudioPlaybackConnector.log (UTF-8).
-// Business events (connect/disconnect/etc.) go through LogEvent(); WIL's
-// LOG_*/THROW_* failures are routed here via wil::SetResultLoggingCallback.
-
-std::wstring GetLogDirectory()
-{
-	wchar_t buf[MAX_PATH];
-	const DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", buf, static_cast<DWORD>(ARRAYSIZE(buf)));
-	if (n == 0 || n >= ARRAYSIZE(buf))
-	{
-		// Fallback: exe directory (only when LOCALAPPDATA is unavailable).
-		return GetModuleFsPath(g_hInst).remove_filename().wstring();
-	}
-	return std::wstring(buf) + L"\\AudioPlaybackConnector";
-}
+// Log file: AudioPlaybackConnector.log next to the exe, in the same directory
+// as the AudioPlaybackConnector.json config file (UTF-8). Business events
+// (connect/disconnect/etc.) go through LogEvent(); WIL's LOG_*/THROW_*
+// failures are routed here via wil::SetResultLoggingCallback.
 
 std::wstring GetLogFilePath()
 {
-	return GetLogDirectory() + L"\\AudioPlaybackConnector.log";
+	return (GetModuleFsPath(g_hInst).remove_filename() / L"AudioPlaybackConnector.log").wstring();
 }
 
 // Append one line to the log file. Thread-safe; never throws.
@@ -44,8 +33,6 @@ void WriteLogLine(const wchar_t* text)
 	{
 		static std::mutex s_logMutex;
 		std::lock_guard<std::mutex> lock(s_logMutex);
-
-		std::filesystem::create_directories(GetLogDirectory());
 
 		std::wstring wtext(text);
 		std::string utf8 = Utf16ToUtf8(wtext);
@@ -450,7 +437,6 @@ void SetupMenu()
 	logItem.Text(_(L"View Logs"));
 	logItem.Icon(logIcon);
 	logItem.Click([](const auto&, const auto&) {
-		std::filesystem::create_directories(GetLogDirectory());
 		auto result = ShellExecuteW(nullptr, L"open", GetLogFilePath().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
 		LOG_LAST_ERROR_IF(reinterpret_cast<INT_PTR>(result) <= 32);
 	});
