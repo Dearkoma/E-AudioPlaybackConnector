@@ -20,10 +20,9 @@ HINSTANCE g_hInst;
 HWND g_hWnd;
 HWND g_hWndXaml;
 Canvas g_xamlCanvas = nullptr;
-Flyout g_xamlFlyout = nullptr;
-MenuFlyout g_xamlMenu = nullptr;
-FocusState g_menuFocusState = FocusState::Unfocused;
 DevicePicker g_devicePicker = nullptr;
+DesktopWindowXamlSource g_desktopSource = nullptr;
+winrt::com_ptr<IDesktopWindowXamlSourceNative2> g_desktopSourceNative2;
 std::unordered_map<std::wstring, std::pair<DeviceInformation, AudioPlaybackConnection>> g_audioPlaybackConnections;
 std::mutex g_connectionsMutex; // Protects g_audioPlaybackConnections
 HICON g_hIconLight = nullptr;

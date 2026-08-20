@@ -81,17 +81,39 @@ void LogEvent(PCWSTR fmt, ...)
 	WriteLogLine(line);
 }
 
+// Menu command ids for the Win32 popup menu.
+enum : UINT
+{
+	IDM_BLUETOOTH_SETTINGS = 1,
+	IDM_LANG_EN,
+	IDM_LANG_ZH,
+	IDM_VIEW_LOGS,
+	IDM_DISCONNECT_ALL,
+	IDM_RESTART_AUDIO,
+	IDM_EXIT,
+};
+
+// SetDisplayStatus may be called by a ConnectDevice coroutine after the picker
+// was dismissed and its island torn down (g_devicePicker can be null); swallow
+// any failure so a stale status update can never crash the app.
+void SafeSetDisplayStatus(DevicePicker const& picker, DeviceInformation const& device, winrt::hstring const& status, DevicePickerDisplayStatusOptions options)
+{
+	try { if (picker) picker.SetDisplayStatus(device, status, options); } catch (...) {}
+}
+
 LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
-void SetupFlyout();
-void SetupMenu();
 winrt::fire_and_forget ConnectDevice(DevicePicker, std::wstring_view);
-void SetupDevicePicker();
 void SetupSvgIcon();
 void UpdateNotifyIcon();
 void DisconnectAllDevices();
 winrt::fire_and_forget RestoreAudioService();
 winrt::fire_and_forget ReconnectDevices(std::vector<std::wstring> deviceIds);
 void RebuildUi();
+void CreateIsland();
+void DestroyIsland();
+void ShowDevicePicker(Rect);
+HMENU BuildPopupMenu();
+void HandleMenuCommand(int cmd);
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 	_In_opt_ HINSTANCE hPrevInstance,
@@ -145,19 +167,12 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 	FAIL_FAST_LAST_ERROR_IF_NULL(g_hWnd);
 	FAIL_FAST_IF_WIN32_BOOL_FALSE(SetLayeredWindowAttributes(g_hWnd, 0, 0, LWA_ALPHA));
 
-	DesktopWindowXamlSource desktopSource;
-	auto desktopSourceNative2 = desktopSource.as<IDesktopWindowXamlSourceNative2>();
-	winrt::check_hresult(desktopSourceNative2->AttachToWindow(g_hWnd));
-	winrt::check_hresult(desktopSourceNative2->get_WindowHandle(&g_hWndXaml));
-
-	g_xamlCanvas = Canvas();
-	desktopSource.Content(g_xamlCanvas);
-
+	// No XAML island is created at startup: the tray menu is a plain Win32
+	// popup menu, and the island (hosting the DevicePicker) is created on
+	// demand only while the picker is open, then torn down when it dismisses.
+	// This avoids keeping a DirectComposition surface alive in the background.
 	LoadSettings();
 	ReloadTranslations();
-	SetupFlyout();
-	SetupMenu();
-	SetupDevicePicker();
 	SetupSvgIcon();
 
 	g_nid.hWnd = g_niid.hWnd = g_hWnd;
@@ -173,7 +188,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 	while (GetMessageW(&msg, nullptr, 0, 0))
 	{
 		BOOL processed = FALSE;
-		winrt::check_hresult(desktopSourceNative2->PreTranslateMessage(&msg, &processed));
+		if (g_desktopSourceNative2)
+		{
+			winrt::check_hresult(g_desktopSourceNative2->PreTranslateMessage(&msg, &processed));
+		}
 		if (!processed)
 		{
 			TranslateMessage(&msg);
@@ -195,6 +213,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		// touching resources we are about to release.
 		g_shuttingDown = true;
 		LogEvent(L"Application exiting");
+		DestroyIsland();
 
 		// Save settings while we still have the connection list intact
 		SaveSettings();
@@ -208,7 +227,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			for (auto& pair : g_audioPlaybackConnections)
 			{
 				pair.second.second.Close();
-				g_devicePicker.SetDisplayStatus(pair.second.first, {}, DevicePickerDisplayStatusOptions::None);
+				if (g_devicePicker) g_devicePicker.SetDisplayStatus(pair.second.first, {}, DevicePickerDisplayStatusOptions::None);
 			}
 			g_audioPlaybackConnections.clear();
 		}
@@ -237,8 +256,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		case NIN_SELECT:
 		case NIN_KEYSELECT:
 		{
-			using namespace winrt::Windows::UI::Popups;
-
 			RECT iconRect;
 			auto hr = Shell_NotifyIconGetRect(&g_niid, &iconRect);
 			if (FAILED(hr))
@@ -255,30 +272,28 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				static_cast<float>((iconRect.bottom - iconRect.top) * USER_DEFAULT_SCREEN_DPI / dpi)
 			};
 
-			SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN), SWP_HIDEWINDOW);
-			SetForegroundWindow(hWnd);
-			g_devicePicker.Show(rect, Placement::Above);
+			ShowDevicePicker(rect);
 		}
 		break;
-		case WM_RBUTTONUP: // Menu activated by mouse click
-			g_menuFocusState = FocusState::Pointer;
-			break;
 		case WM_CONTEXTMENU:
 		{
-			if (g_menuFocusState == FocusState::Unfocused)
-				g_menuFocusState = FocusState::Keyboard;
+			// lParam carries the cursor position in screen coords; keyboard
+			// invocation reports (-1,-1), so fall back to the cursor position.
+			POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+			if (pt.x == -1 && pt.y == -1)
+			{
+				GetCursorPos(&pt);
+			}
 
-			auto dpi = GetDpiForWindow(hWnd);
-			Point point = {
-				static_cast<float>(GET_X_LPARAM(wParam) * USER_DEFAULT_SCREEN_DPI / dpi),
-				static_cast<float>(GET_Y_LPARAM(wParam) * USER_DEFAULT_SCREEN_DPI / dpi)
-			};
-
-			SetWindowPos(g_hWndXaml, 0, 0, 0, 0, 0, SWP_NOZORDER | SWP_SHOWWINDOW);
-			SetWindowPos(g_hWnd, HWND_TOPMOST, 0, 0, 1, 1, SWP_SHOWWINDOW);
+			HMENU menu = BuildPopupMenu();
 			SetForegroundWindow(hWnd);
+			const int cmd = static_cast<int>(TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY, pt.x, pt.y, 0, hWnd, nullptr));
+			DestroyMenu(menu);
 
-			g_xamlMenu.ShowAt(g_xamlCanvas, point);
+			if (cmd)
+			{
+				HandleMenuCommand(cmd);
+			}
 		}
 		break;
 		}
@@ -304,7 +319,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		// device must not drop a newer, still-open connection.
 		if (it != g_audioPlaybackConnections.end() && it->second.second == info->connection)
 		{
-			g_devicePicker.SetDisplayStatus(it->second.first, {}, DevicePickerDisplayStatusOptions::None);
+			if (g_devicePicker) g_devicePicker.SetDisplayStatus(it->second.first, {}, DevicePickerDisplayStatusOptions::None);
 			LogEvent(L"Disconnected: %s", it->second.first.Name().c_str());
 			g_audioPlaybackConnections.erase(it);
 		}
@@ -320,187 +335,179 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	return 0;
 }
 
-void SetupFlyout()
+void CreateIsland()
 {
-	TextBlock textBlock;
-	textBlock.Text(_(L"All connections will be closed.\nExit anyway?"));
-	textBlock.Margin({ 0, 0, 0, 12 });
+	if (g_desktopSource) return;
 
-	CheckBox checkbox;
-	checkbox.IsChecked(g_reconnect);
-	checkbox.Content(winrt::box_value(_(L"Reconnect on next start")));
+	g_desktopSource = DesktopWindowXamlSource();
+	g_desktopSourceNative2 = g_desktopSource.as<IDesktopWindowXamlSourceNative2>();
+	winrt::check_hresult(g_desktopSourceNative2->AttachToWindow(g_hWnd));
+	winrt::check_hresult(g_desktopSourceNative2->get_WindowHandle(&g_hWndXaml));
 
-	Button button;
-	button.Content(winrt::box_value(_(L"Exit")));
-	button.HorizontalAlignment(HorizontalAlignment::Right);
-	button.Click([checkbox](const auto&, const auto&) {
-		g_reconnect = checkbox.IsChecked().Value();
-		PostMessageW(g_hWnd, WM_CLOSE, 0, 0);
-	});
-
-	StackPanel stackPanel;
-	stackPanel.Children().Append(textBlock);
-	stackPanel.Children().Append(checkbox);
-	stackPanel.Children().Append(button);
-
-	Flyout flyout;
-	flyout.ShouldConstrainToRootBounds(false);
-	flyout.Content(stackPanel);
-
-	g_xamlFlyout = flyout;
+	g_xamlCanvas = Canvas();
+	g_desktopSource.Content(g_xamlCanvas);
 }
 
-void SetupMenu()
+void DestroyIsland()
 {
-	// https://docs.microsoft.com/en-us/windows/uwp/design/style/segoe-ui-symbol-font
-	FontIcon settingsIcon;
-	settingsIcon.Glyph(L"\xE713");
+	g_devicePicker = nullptr;
+	if (g_desktopSource)
+	{
+		g_desktopSource.Content(nullptr);
+		g_desktopSource = nullptr;
+	}
+	g_desktopSourceNative2 = nullptr;
+	g_hWndXaml = nullptr;
+	g_xamlCanvas = nullptr;
+}
 
-	MenuFlyoutItem settingsItem;
-	settingsItem.Text(_(L"Bluetooth Settings"));
-	settingsItem.Icon(settingsIcon);
-	settingsItem.Click([](const auto&, const auto&) {
+void ShowDevicePicker(Rect rect)
+{
+	// The picker needs the host window visible/foreground; size it full screen
+	// (layered alpha-0 => invisible) so XAML DPI is correct. It is restored to
+	// 1x1, hidden, non-topmost and the island torn down when the picker closes,
+	// so no full-screen composition surface is left behind during normal use.
+	SetWindowPos(g_hWnd, HWND_TOPMOST, 0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN), SWP_SHOWWINDOW);
+	SetForegroundWindow(g_hWnd);
+
+	try
+	{
+		CreateIsland();
+
+		g_devicePicker = DevicePicker();
+		winrt::check_hresult(g_devicePicker.as<IInitializeWithWindow>()->Initialize(g_hWnd));
+
+		g_devicePicker.Filter().SupportedDeviceSelectors().Append(AudioPlaybackConnection::GetDeviceSelector());
+		g_devicePicker.DevicePickerDismissed([](const auto&, const auto&) {
+			DestroyIsland();
+			SetWindowPos(g_hWnd, HWND_NOTOPMOST, 0, 0, 1, 1, SWP_NOZORDER | SWP_HIDEWINDOW);
+		});
+		g_devicePicker.DeviceSelected([](const auto& sender, const auto& args) {
+			ConnectDevice(sender, args.SelectedDevice());
+		});
+		g_devicePicker.DisconnectButtonClicked([](const auto& sender, const auto& args) {
+			auto device = args.Device();
+			{
+				std::lock_guard<std::mutex> lock(g_connectionsMutex);
+				auto it = g_audioPlaybackConnections.find(std::wstring(device.Id()));
+				if (it != g_audioPlaybackConnections.end())
+				{
+					it->second.second.Close();
+					g_audioPlaybackConnections.erase(it);
+					// StateChanged → WM_CONNECTION_CLOSED handles async
+					// endpoint cleanup on the UI thread.
+				}
+			}
+			SafeSetDisplayStatus(sender, device, {}, DevicePickerDisplayStatusOptions::None);
+		});
+
+		g_devicePicker.Show(rect, winrt::Windows::UI::Xaml::Controls::Primitives::Placement::Above);
+	}
+	catch (winrt::hresult_error const&)
+	{
+		// Picker failed to open — clean up and restore the hidden window.
+		LOG_CAUGHT_EXCEPTION();
+		DestroyIsland();
+		SetWindowPos(g_hWnd, HWND_NOTOPMOST, 0, 0, 1, 1, SWP_NOZORDER | SWP_HIDEWINDOW);
+	}
+}
+
+void ShowExitConfirmation()
+{
+	bool hasConnections;
+	{
+		std::lock_guard<std::mutex> lock(g_connectionsMutex);
+		hasConnections = !g_audioPlaybackConnections.empty();
+	}
+	if (!hasConnections)
+	{
+		PostMessageW(g_hWnd, WM_CLOSE, 0, 0);
+		return;
+	}
+
+	TASKDIALOGCONFIG config{};
+	config.cbSize = sizeof(config);
+	config.hwndParent = g_hWnd;
+	config.dwCommonButtons = TDCBF_OK_BUTTON | TDCBF_CANCEL_BUTTON;
+	config.pszWindowTitle = L"AudioPlaybackConnector";
+	config.pszMainIcon = TD_INFORMATION_ICON;
+	config.pszMainInstruction = _(L"All connections will be closed.\nExit anyway?");
+	config.pszVerificationText = _(L"Reconnect on next start");
+
+	BOOL verifyChecked = g_reconnect ? TRUE : FALSE;
+	config.pfVerificationFlagChecked = &verifyChecked;
+
+	int buttonPressed = 0;
+	if (SUCCEEDED(TaskDialogIndirect(&config, &buttonPressed, nullptr, &verifyChecked)) && buttonPressed == IDOK)
+	{
+		g_reconnect = verifyChecked ? true : false;
+		SaveSettings();
+		PostMessageW(g_hWnd, WM_CLOSE, 0, 0);
+	}
+}
+
+HMENU BuildPopupMenu()
+{
+	HMENU menu = CreatePopupMenu();
+
+	AppendMenuW(menu, MF_STRING, IDM_BLUETOOTH_SETTINGS, _(L"Bluetooth Settings"));
+
+	HMENU langMenu = CreatePopupMenu();
+	AppendMenuW(langMenu, MF_STRING, IDM_LANG_EN, L"English");
+	AppendMenuW(langMenu, MF_STRING, IDM_LANG_ZH, L"中文");
+	AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(langMenu), _(L"Language"));
+
+	AppendMenuW(menu, MF_STRING, IDM_VIEW_LOGS, _(L"View Logs"));
+	AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+	AppendMenuW(menu, MF_STRING, IDM_DISCONNECT_ALL, _(L"Disconnect All"));
+	AppendMenuW(menu, MF_STRING, IDM_RESTART_AUDIO, _(L"Restart Bluetooth Audio"));
+	AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+	AppendMenuW(menu, MF_STRING, IDM_EXIT, _(L"Exit"));
+
+	return menu;
+}
+
+void HandleMenuCommand(int cmd)
+{
+	switch (cmd)
+	{
+	case IDM_BLUETOOTH_SETTINGS:
 		winrt::Windows::System::Launcher::LaunchUriAsync(Uri(L"ms-settings:bluetooth"));
-	});
-
-	FontIcon closeIcon;
-	closeIcon.Glyph(L"\xE8BB");
-
-	MenuFlyoutItem exitItem;
-	exitItem.Text(_(L"Exit"));
-	exitItem.Icon(closeIcon);
-	exitItem.Click([](const auto&, const auto&) {
-		bool hasConnections;
-		{
-			std::lock_guard<std::mutex> lock(g_connectionsMutex);
-			hasConnections = !g_audioPlaybackConnections.empty();
-		}
-		if (!hasConnections)
-		{
-			PostMessageW(g_hWnd, WM_CLOSE, 0, 0);
-			return;
-		}
-
-		RECT iconRect;
-		auto hr = Shell_NotifyIconGetRect(&g_niid, &iconRect);
-		if (FAILED(hr))
-		{
-			LOG_HR(hr);
-			return;
-		}
-
-		auto dpi = GetDpiForWindow(g_hWnd);
-
-		SetWindowPos(g_hWnd, HWND_TOPMOST, iconRect.left, iconRect.top, 0, 0, SWP_HIDEWINDOW);
-		g_xamlCanvas.Width(static_cast<float>((iconRect.right - iconRect.left) * USER_DEFAULT_SCREEN_DPI / dpi));
-		g_xamlCanvas.Height(static_cast<float>((iconRect.bottom - iconRect.top) * USER_DEFAULT_SCREEN_DPI / dpi));
-
-		g_xamlFlyout.ShowAt(g_xamlCanvas);
-	});
-
-	MenuFlyout menu;
-	menu.Items().Append(settingsItem);
-
-	// --- Language ---
-	FontIcon langIcon;
-	langIcon.Glyph(L"\xE8B1"); // Globe
-
-	MenuFlyoutSubItem langSubItem;
-	langSubItem.Text(_(L"Language"));
-	langSubItem.Icon(langIcon);
-
-	MenuFlyoutItem langEnItem;
-	langEnItem.Text(L"English");
-	langEnItem.Click([](const auto&, const auto&) {
+		break;
+	case IDM_LANG_EN:
 		g_language = L"en";
 		SaveSettings();
 		RebuildUi();
-	});
-
-	MenuFlyoutItem langZhItem;
-	langZhItem.Text(L"中文");
-	langZhItem.Click([](const auto&, const auto&) {
+		break;
+	case IDM_LANG_ZH:
 		g_language = L"zh-CN";
 		SaveSettings();
 		RebuildUi();
-	});
-
-	langSubItem.Items().Append(langEnItem);
-	langSubItem.Items().Append(langZhItem);
-	menu.Items().Append(langSubItem);
-
-	// --- View Logs ---
-	FontIcon logIcon;
-	logIcon.Glyph(L"\xE8A5"); // List
-
-	MenuFlyoutItem logItem;
-	logItem.Text(_(L"View Logs"));
-	logItem.Icon(logIcon);
-	logItem.Click([](const auto&, const auto&) {
+		break;
+	case IDM_VIEW_LOGS:
+	{
 		auto result = ShellExecuteW(nullptr, L"open", GetLogFilePath().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
 		LOG_LAST_ERROR_IF(reinterpret_cast<INT_PTR>(result) <= 32);
-	});
-
-	menu.Items().Append(logItem);
-
-	// --- Disconnect All ---
-	MenuFlyoutSeparator separator1;
-
-	FontIcon disconnectIcon;
-	disconnectIcon.Glyph(L"\xE894"); // DisconnectDrive
-
-	MenuFlyoutItem disconnectAllItem;
-	disconnectAllItem.Text(_(L"Disconnect All"));
-	disconnectAllItem.Icon(disconnectIcon);
-	disconnectAllItem.Click([](const auto&, const auto&) {
+		break;
+	}
+	case IDM_DISCONNECT_ALL:
 		DisconnectAllDevices();
-	});
-
-	menu.Items().Append(separator1);
-	menu.Items().Append(disconnectAllItem);
-
-	// --- Restart Audio ---
-	FontIcon repairIcon;
-	repairIcon.Glyph(L"\xE72C"); // Repair
-
-	MenuFlyoutItem restartAudioItem;
-	restartAudioItem.Text(_(L"Restart Bluetooth Audio"));
-	restartAudioItem.Icon(repairIcon);
-	restartAudioItem.Click([](const auto&, const auto&) {
+		break;
+	case IDM_RESTART_AUDIO:
 		RestoreAudioService();
-	});
-
-	menu.Items().Append(restartAudioItem);
-
-	// --- Separator before Exit ---
-	MenuFlyoutSeparator separator2;
-	menu.Items().Append(separator2);
-
-	// --- Exit ---
-	menu.Items().Append(exitItem);
-	menu.Opened([](const auto& sender, const auto&) {
-		auto menuItems = sender.as<MenuFlyout>().Items();
-		auto itemsCount = menuItems.Size();
-		if (itemsCount > 0)
-		{
-			menuItems.GetAt(itemsCount - 1).Focus(g_menuFocusState);
-		}
-		g_menuFocusState = FocusState::Unfocused;
-	});
-	menu.Closed([](const auto&, const auto&) {
-		ShowWindow(g_hWnd, SW_HIDE);
-	});
-
-	g_xamlMenu = menu;
+		break;
+	case IDM_EXIT:
+		ShowExitConfirmation();
+		break;
+	}
 }
 
 void RebuildUi()
 {
-	// Reload the translation maps for the newly selected language,
-	// then reconstruct all UI that was built with translated strings.
+	// Reload the translation maps for the newly selected language. The Win32
+	// popup menu is rebuilt from _() strings on every open, so no persistent
+	// XAML UI needs reconstructing here.
 	ReloadTranslations();
-	SetupFlyout();
-	SetupMenu();
 	wcscpy_s(g_nid.szTip, _(L"AudioPlaybackConnector"));
 	UpdateNotifyIcon();
 }
@@ -511,7 +518,7 @@ winrt::fire_and_forget ConnectDevice(DevicePicker picker, DeviceInformation devi
 
 	LogEvent(L"Connecting: %s", device.Name().c_str());
 
-	picker.SetDisplayStatus(device, _(L"Connecting"), DevicePickerDisplayStatusOptions::ShowProgress | DevicePickerDisplayStatusOptions::ShowDisconnectButton);
+	SafeSetDisplayStatus(picker, device, _(L"Connecting"), DevicePickerDisplayStatusOptions::ShowProgress | DevicePickerDisplayStatusOptions::ShowDisconnectButton);
 
 	bool success = false;
 	std::wstring errorMessage;
@@ -591,7 +598,7 @@ winrt::fire_and_forget ConnectDevice(DevicePicker picker, DeviceInformation devi
 
 	if (success)
 	{
-		picker.SetDisplayStatus(device, _(L"Connected"), DevicePickerDisplayStatusOptions::ShowDisconnectButton);
+		SafeSetDisplayStatus(picker, device, _(L"Connected"), DevicePickerDisplayStatusOptions::ShowDisconnectButton);
 		LogEvent(L"Connected: %s", device.Name().c_str());
 	}
 	else
@@ -609,7 +616,7 @@ winrt::fire_and_forget ConnectDevice(DevicePicker picker, DeviceInformation devi
 			}
 		}
 		LogEvent(L"Connect failed: %s  (%s)", device.Name().c_str(), errorMessage.c_str());
-		picker.SetDisplayStatus(device, errorMessage, DevicePickerDisplayStatusOptions::ShowRetryButton);
+		SafeSetDisplayStatus(picker, device, errorMessage, DevicePickerDisplayStatusOptions::ShowRetryButton);
 	}
 }
 
@@ -620,38 +627,6 @@ winrt::fire_and_forget ConnectDevice(DevicePicker picker, std::wstring_view devi
 	auto device = co_await DeviceInformation::CreateFromIdAsync(deviceId);
 	if (g_shuttingDown) co_return;
 	ConnectDevice(picker, device);
-}
-
-void SetupDevicePicker()
-{
-	g_devicePicker = DevicePicker();
-	winrt::check_hresult(g_devicePicker.as<IInitializeWithWindow>()->Initialize(g_hWnd));
-
-	g_devicePicker.Filter().SupportedDeviceSelectors().Append(AudioPlaybackConnection::GetDeviceSelector());
-	g_devicePicker.DevicePickerDismissed([](const auto&, const auto&) {
-		// Undo the full-screen size + topmost state used to show the picker:
-		// restore the tiny hidden window so a full-screen layered window is
-		// never left behind (it can interfere with DWM/game composition).
-		SetWindowPos(g_hWnd, HWND_NOTOPMOST, 0, 0, 1, 1, SWP_NOZORDER | SWP_HIDEWINDOW);
-	});
-	g_devicePicker.DeviceSelected([](const auto& sender, const auto& args) {
-		ConnectDevice(sender, args.SelectedDevice());
-	});
-	g_devicePicker.DisconnectButtonClicked([](const auto& sender, const auto& args) {
-		auto device = args.Device();
-		{
-			std::lock_guard<std::mutex> lock(g_connectionsMutex);
-			auto it = g_audioPlaybackConnections.find(std::wstring(device.Id()));
-			if (it != g_audioPlaybackConnections.end())
-			{
-				it->second.second.Close();
-				g_audioPlaybackConnections.erase(it);
-				// StateChanged → WM_CONNECTION_CLOSED handles async
-				// endpoint cleanup on the UI thread; no Sleep() needed.
-			}
-		}
-		sender.SetDisplayStatus(device, {}, DevicePickerDisplayStatusOptions::None);
-	});
 }
 
 void SetupSvgIcon()
@@ -710,7 +685,7 @@ void DisconnectAllDevices()
 		for (auto& pair : g_audioPlaybackConnections)
 		{
 			pair.second.second.Close();
-			g_devicePicker.SetDisplayStatus(pair.second.first, {}, DevicePickerDisplayStatusOptions::None);
+			if (g_devicePicker) g_devicePicker.SetDisplayStatus(pair.second.first, {}, DevicePickerDisplayStatusOptions::None);
 		}
 
 		g_audioPlaybackConnections.clear();
@@ -758,7 +733,7 @@ winrt::fire_and_forget RestoreAudioService()
 		{
 			deviceIds.push_back(pair.first);
 			pair.second.second.Close();
-			g_devicePicker.SetDisplayStatus(pair.second.first, {}, DevicePickerDisplayStatusOptions::None);
+			if (g_devicePicker) g_devicePicker.SetDisplayStatus(pair.second.first, {}, DevicePickerDisplayStatusOptions::None);
 		}
 		g_audioPlaybackConnections.clear();
 	}
