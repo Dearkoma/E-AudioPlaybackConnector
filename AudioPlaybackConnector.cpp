@@ -766,10 +766,11 @@ winrt::fire_and_forget RestoreAudioService()
 
 	LogEvent(L"Restart Bluetooth Audio: closed %zu connection(s), reconnecting", deviceIds.size());
 
-	// Wait for async audio endpoint cleanup to complete before reconnecting.
-	// Without this, the old endpoint may still be releasing resources when
-	// we try to open a new one for the same device.
-	co_await winrt::resume_after(std::chrono::seconds(1));
+	// Let Windows finish releasing the old sink endpoints before we create
+	// fresh ones for the same devices. Without enough time, the new connection
+	// can collide with an endpoint that is still being torn down, which shows
+	// up as silent audio even though the phone reconnects.
+	co_await winrt::resume_after(std::chrono::seconds(3));
 
 	// If the user exited during the wait, don't reconnect
 	if (g_shuttingDown) co_return;
