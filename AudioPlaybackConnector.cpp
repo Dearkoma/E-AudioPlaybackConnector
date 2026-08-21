@@ -93,9 +93,10 @@ enum : UINT
 	IDM_EXIT,
 };
 
-// Bumped each time the device picker is shown; guards the delayed island
-// teardown so a re-shown picker never has its island destroyed underneath it.
-static int g_pickerGeneration = 0;
+// Deferred island teardown after the picker closes: a UI-thread timer (not a
+// coroutine) so the teardown always runs on the UI thread. Gives in-flight
+// ConnectDevice coroutines time to finish on the island's dispatcher first.
+constexpr UINT_PTR kPickerTeardownTimer = 1;
 
 // SetDisplayStatus may be called by a ConnectDevice coroutine after the picker
 // was dismissed and its island torn down (g_devicePicker can be null); swallow
@@ -116,7 +117,6 @@ winrt::fire_and_forget ReconnectDevices(std::vector<std::wstring> deviceIds);
 void RebuildUi();
 void CreateIsland();
 void DestroyIsland();
-winrt::fire_and_forget DelayedDestroyIsland(int generation);
 void ShowDevicePicker(Rect);
 HMENU BuildPopupMenu();
 void HandleMenuCommand(int cmd);
@@ -219,6 +219,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		// touching resources we are about to release.
 		g_shuttingDown = true;
 		LogEvent(L"Application exiting");
+		KillTimer(g_hWnd, kPickerTeardownTimer);
 		DestroyIsland();
 
 		// Save settings while we still have the connection list intact
@@ -329,6 +330,17 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		}
 		break;
 	}
+	case WM_TIMER:
+		if (wParam == kPickerTeardownTimer)
+		{
+			KillTimer(hWnd, kPickerTeardownTimer);
+			// If the picker was re-shown, keep the island for it.
+			if (!g_devicePicker)
+			{
+				DestroyIsland();
+			}
+		}
+		break;
 	default:
 		if (WM_TASKBAR_CREATED && message == WM_TASKBAR_CREATED)
 		{
@@ -357,27 +369,20 @@ void DestroyIsland()
 	g_devicePicker = nullptr;
 	if (g_desktopSource)
 	{
-		g_desktopSource.Content(nullptr);
+		try
+		{
+			g_desktopSource.Content(nullptr);
+		}
+		catch (...)
+		{
+			// The island may already be partially torn down; never let
+			// teardown crash the app.
+		}
 		g_desktopSource = nullptr;
 	}
 	g_desktopSourceNative2 = nullptr;
 	g_hWndXaml = nullptr;
 	g_xamlCanvas = nullptr;
-}
-
-// Tear down the XAML island shortly after the picker closes. Destroying it
-// immediately would yank the XAML dispatcher out from under any in-flight
-// ConnectDevice coroutine, making its continuation resume on a thread-pool
-// thread and fail with RPC_E_WRONG_THREAD. The delay lets those finish on the
-// island's dispatcher first; a re-shown picker (generation change) keeps it.
-winrt::fire_and_forget DelayedDestroyIsland(int generation)
-{
-	co_await winrt::resume_after(std::chrono::seconds(5));
-	if (g_shuttingDown || g_pickerGeneration != generation)
-	{
-		co_return;
-	}
-	DestroyIsland();
 }
 
 void ShowDevicePicker(Rect rect)
@@ -386,7 +391,6 @@ void ShowDevicePicker(Rect rect)
 	// (layered alpha-0 => invisible) so XAML DPI is correct. It is restored to
 	// 1x1, hidden, non-topmost and the island torn down when the picker closes,
 	// so no full-screen composition surface is left behind during normal use.
-	++g_pickerGeneration;
 	SetWindowPos(g_hWnd, HWND_TOPMOST, 0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN), SWP_SHOWWINDOW);
 	SetForegroundWindow(g_hWnd);
 
@@ -401,10 +405,10 @@ void ShowDevicePicker(Rect rect)
 		g_devicePicker.DevicePickerDismissed([](const auto&, const auto&) {
 			// Null the global picker right away (in-flight coroutines keep their
 			// own copy alive), restore the tiny hidden window, and defer island
-			// teardown so pending connects finish on the island's thread.
+			// teardown via a UI-thread timer so pending connects finish first.
 			g_devicePicker = nullptr;
 			SetWindowPos(g_hWnd, HWND_NOTOPMOST, 0, 0, 1, 1, SWP_NOZORDER | SWP_HIDEWINDOW);
-			DelayedDestroyIsland(g_pickerGeneration);
+			SetTimer(g_hWnd, kPickerTeardownTimer, 5000, nullptr);
 		});
 		g_devicePicker.DeviceSelected([](const auto& sender, const auto& args) {
 			ConnectDevice(sender, args.SelectedDevice());
@@ -620,6 +624,13 @@ winrt::fire_and_forget ConnectDevice(DevicePicker picker, DeviceInformation devi
 			}
 		}
 		LOG_CAUGHT_EXCEPTION();
+	}
+	catch (...)
+	{
+		// Never let an unexpected exception escape a fire_and_forget coroutine,
+		// which would terminate the whole process.
+		success = false;
+		errorMessage = _(L"Unknown error");
 	}
 
 	if (success)
