@@ -93,6 +93,10 @@ enum : UINT
 	IDM_EXIT,
 };
 
+// Bumped each time the device picker is shown; guards the delayed island
+// teardown so a re-shown picker never has its island destroyed underneath it.
+static int g_pickerGeneration = 0;
+
 // SetDisplayStatus may be called by a ConnectDevice coroutine after the picker
 // was dismissed and its island torn down (g_devicePicker can be null); swallow
 // any failure so a stale status update can never crash the app.
@@ -112,6 +116,7 @@ winrt::fire_and_forget ReconnectDevices(std::vector<std::wstring> deviceIds);
 void RebuildUi();
 void CreateIsland();
 void DestroyIsland();
+winrt::fire_and_forget DelayedDestroyIsland(int generation);
 void ShowDevicePicker(Rect);
 HMENU BuildPopupMenu();
 void HandleMenuCommand(int cmd);
@@ -278,13 +283,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		break;
 		case WM_CONTEXTMENU:
 		{
-			// lParam carries the cursor position in screen coords; keyboard
-			// invocation reports (-1,-1), so fall back to the cursor position.
-			POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
-			if (pt.x == -1 && pt.y == -1)
-			{
-				GetCursorPos(&pt);
-			}
+			// The tray callback does not carry coordinates in wParam/lParam
+			// (lParam is the WM_CONTEXTMENU value itself), so use the real
+			// cursor position to place the popup menu.
+			POINT pt;
+			GetCursorPos(&pt);
 
 			HMENU menu = BuildPopupMenu();
 			SetForegroundWindow(hWnd);
@@ -362,12 +365,28 @@ void DestroyIsland()
 	g_xamlCanvas = nullptr;
 }
 
+// Tear down the XAML island shortly after the picker closes. Destroying it
+// immediately would yank the XAML dispatcher out from under any in-flight
+// ConnectDevice coroutine, making its continuation resume on a thread-pool
+// thread and fail with RPC_E_WRONG_THREAD. The delay lets those finish on the
+// island's dispatcher first; a re-shown picker (generation change) keeps it.
+winrt::fire_and_forget DelayedDestroyIsland(int generation)
+{
+	co_await winrt::resume_after(std::chrono::seconds(5));
+	if (g_shuttingDown || g_pickerGeneration != generation)
+	{
+		co_return;
+	}
+	DestroyIsland();
+}
+
 void ShowDevicePicker(Rect rect)
 {
 	// The picker needs the host window visible/foreground; size it full screen
 	// (layered alpha-0 => invisible) so XAML DPI is correct. It is restored to
 	// 1x1, hidden, non-topmost and the island torn down when the picker closes,
 	// so no full-screen composition surface is left behind during normal use.
+	++g_pickerGeneration;
 	SetWindowPos(g_hWnd, HWND_TOPMOST, 0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN), SWP_SHOWWINDOW);
 	SetForegroundWindow(g_hWnd);
 
@@ -380,8 +399,12 @@ void ShowDevicePicker(Rect rect)
 
 		g_devicePicker.Filter().SupportedDeviceSelectors().Append(AudioPlaybackConnection::GetDeviceSelector());
 		g_devicePicker.DevicePickerDismissed([](const auto&, const auto&) {
-			DestroyIsland();
+			// Null the global picker right away (in-flight coroutines keep their
+			// own copy alive), restore the tiny hidden window, and defer island
+			// teardown so pending connects finish on the island's thread.
+			g_devicePicker = nullptr;
 			SetWindowPos(g_hWnd, HWND_NOTOPMOST, 0, 0, 1, 1, SWP_NOZORDER | SWP_HIDEWINDOW);
+			DelayedDestroyIsland(g_pickerGeneration);
 		});
 		g_devicePicker.DeviceSelected([](const auto& sender, const auto& args) {
 			ConnectDevice(sender, args.SelectedDevice());
