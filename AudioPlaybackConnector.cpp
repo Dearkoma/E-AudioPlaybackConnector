@@ -93,11 +93,6 @@ enum : UINT
 	IDM_EXIT,
 };
 
-// Deferred island teardown after the picker closes: a UI-thread timer (not a
-// coroutine) so the teardown always runs on the UI thread. Gives in-flight
-// ConnectDevice coroutines time to finish on the island's dispatcher first.
-constexpr UINT_PTR kPickerTeardownTimer = 1;
-
 // SetDisplayStatus may be called by a ConnectDevice coroutine after the picker
 // was dismissed and its island torn down (g_devicePicker can be null); swallow
 // any failure so a stale status update can never crash the app.
@@ -219,7 +214,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		// touching resources we are about to release.
 		g_shuttingDown = true;
 		LogEvent(L"Application exiting");
-		KillTimer(g_hWnd, kPickerTeardownTimer);
 		DestroyIsland();
 
 		// Save settings while we still have the connection list intact
@@ -330,17 +324,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		}
 		break;
 	}
-	case WM_TIMER:
-		if (wParam == kPickerTeardownTimer)
-		{
-			KillTimer(hWnd, kPickerTeardownTimer);
-			// If the picker was re-shown, keep the island for it.
-			if (!g_devicePicker)
-			{
-				DestroyIsland();
-			}
-		}
-		break;
 	default:
 		if (WM_TASKBAR_CREATED && message == WM_TASKBAR_CREATED)
 		{
@@ -389,8 +372,9 @@ void ShowDevicePicker(Rect rect)
 {
 	// The picker needs the host window visible/foreground; size it full screen
 	// (layered alpha-0 => invisible) so XAML DPI is correct. It is restored to
-	// 1x1, hidden, non-topmost and the island torn down when the picker closes,
-	// so no full-screen composition surface is left behind during normal use.
+	// 1x1, hidden, non-topmost when the picker closes. The island itself is
+	// created lazily on first use and then kept alive (hidden) — recreating a
+	// DesktopWindowXamlSource on the same host window proved crash-prone.
 	SetWindowPos(g_hWnd, HWND_TOPMOST, 0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN), SWP_SHOWWINDOW);
 	SetForegroundWindow(g_hWnd);
 
@@ -403,12 +387,13 @@ void ShowDevicePicker(Rect rect)
 
 		g_devicePicker.Filter().SupportedDeviceSelectors().Append(AudioPlaybackConnection::GetDeviceSelector());
 		g_devicePicker.DevicePickerDismissed([](const auto&, const auto&) {
-			// Null the global picker right away (in-flight coroutines keep their
-			// own copy alive), restore the tiny hidden window, and defer island
-			// teardown via a UI-thread timer so pending connects finish first.
+			// Null the global picker (in-flight coroutines keep their own copy)
+			// and restore the tiny hidden non-topmost window. The island itself
+			// is kept alive (created lazily on first use): recreating a
+			// DesktopWindowXamlSource on the same host window on repeated opens
+			// proved crash-prone.
 			g_devicePicker = nullptr;
 			SetWindowPos(g_hWnd, HWND_NOTOPMOST, 0, 0, 1, 1, SWP_NOZORDER | SWP_HIDEWINDOW);
-			SetTimer(g_hWnd, kPickerTeardownTimer, 5000, nullptr);
 		});
 		g_devicePicker.DeviceSelected([](const auto& sender, const auto& args) {
 			ConnectDevice(sender, args.SelectedDevice());
